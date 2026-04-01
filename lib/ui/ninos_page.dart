@@ -4,9 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
-import 'lista_ninos_page.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
+import 'lista_ninos_page.dart';
+import 'detalle_nino_page.dart';
 
 class NinosPage extends StatefulWidget {
   const NinosPage({super.key});
@@ -36,7 +37,7 @@ class _NinosPageState extends State<NinosPage> {
     'salud_y_nutricion',
     'familia_comunidad_y_redes',
     'componente_pedagogico',
-    'otros'
+    'otros',
   ];
 
   // FOTO
@@ -90,8 +91,7 @@ class _NinosPageState extends State<NinosPage> {
     if (archivo != null) {
       try {
         final inputImage = InputImage.fromFile(archivo!);
-        final recognizedText =
-            await textRecognizer.processImage(inputImage);
+        final recognizedText = await textRecognizer.processImage(inputImage);
         textoFinal += recognizedText.text + "\n\n";
       } catch (_) {
         print("Archivo no compatible con OCR");
@@ -105,23 +105,23 @@ class _NinosPageState extends State<NinosPage> {
   // 💾 GUARDAR
   Future<void> guardarNino() async {
     if (nombreController.text.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Ingresa el nombre')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Ingresa el nombre')));
       return;
     }
 
     if (categoriaSeleccionada == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Selecciona carpeta')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Selecciona carpeta')));
       return;
     }
 
     if (documentosEscaneados.isEmpty && archivo == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Escanea o sube algo')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Escanea o sube algo')));
       return;
     }
 
@@ -139,33 +139,76 @@ class _NinosPageState extends State<NinosPage> {
       final texto = await extraerTextoCompleto();
       print("TEXTO OCR:\n$texto");
 
-      String url = 'SIN_URL';
+      // guardar archivo OCR (texto) si tiene contenido
+      String urlTexto = 'SIN_URL';
+      if (texto.trim().isNotEmpty) {
+        try {
+          final bytes = Uint8List.fromList(texto.codeUnits);
+          final path = '$categoriaSeleccionada/$idNino/documento_oculto.txt';
 
-      // intentar subir texto (si falla no rompe)
-      try {
-        final bytes = Uint8List.fromList(texto.codeUnits);
-        final path = '$categoriaSeleccionada/$idNino/documento.txt';
+          await supabase.storage.from('documentos').uploadBinary(path, bytes);
+          urlTexto = supabase.storage.from('documentos').getPublicUrl(path);
 
-        await supabase.storage
-            .from('documentos')
-            .uploadBinary(path, bytes);
-
-        url = supabase.storage
-            .from('documentos')
-            .getPublicUrl(path);
-
-      } catch (e) {
-        print("ERROR STORAGE (IGNORADO): $e");
+          await supabase.from('documentos').insert({
+            'id_nino': idNino,
+            'nombre_archivo': 'documento_oculto.txt',
+            'url': urlTexto,
+            'tipo': 'texto',
+            'categoria': categoriaSeleccionada,
+          });
+          print("✓ Documento OCR guardado en tabla");
+        } catch (e) {
+          print("❌ ERROR STORAGE (OCR TEXTO): $e");
+        }
       }
 
-      // guardar en tabla documentos
-      await supabase.from('documentos').insert({
-        'id_nino': idNino,
-        'nombre_archivo': 'documento.txt',
-        'url': url,
-        'tipo': 'texto',
-        'categoria': categoriaSeleccionada,
-      });
+      // almacenar archivo subido por el usuario (si existe)
+      String urlArchivo = 'SIN_URL';
+      if (archivo != null && nombreArchivo != null) {
+        try {
+          final bytes = await archivo!.readAsBytes();
+          final path = '$categoriaSeleccionada/$idNino/$nombreArchivo';
+
+          await supabase.storage.from('documentos').uploadBinary(path, bytes);
+          urlArchivo = supabase.storage.from('documentos').getPublicUrl(path);
+
+          await supabase.from('documentos').insert({
+            'id_nino': idNino,
+            'nombre_archivo': nombreArchivo,
+            'url': urlArchivo,
+            'tipo': 'archivo',
+            'categoria': categoriaSeleccionada,
+          });
+          print("✓ Archivo guardado en tabla: $nombreArchivo");
+        } catch (e) {
+          print("❌ ERROR STORAGE (ARCHIVO): $e");
+        }
+      }
+
+      // almacenar documentos escaneados
+      for (var i = 0; i < documentosEscaneados.length; i++) {
+        final doc = documentosEscaneados[i];
+        try {
+          final bytes = await doc.readAsBytes();
+          final nombreDoc =
+              'documento_escaner_${i + 1}.${doc.path.split('.').last}';
+          final path = '$categoriaSeleccionada/$idNino/$nombreDoc';
+
+          await supabase.storage.from('documentos').uploadBinary(path, bytes);
+          final urlDoc = supabase.storage.from('documentos').getPublicUrl(path);
+
+          await supabase.from('documentos').insert({
+            'id_nino': idNino,
+            'nombre_archivo': nombreDoc,
+            'url': urlDoc,
+            'tipo': 'imagen',
+            'categoria': categoriaSeleccionada,
+          });
+          print("✓ Escaneo $i guardado en tabla: $nombreDoc");
+        } catch (e) {
+          print("❌ ERROR STORAGE (ESCANEO $i): $e");
+        }
+      }
 
       // limpiar
       setState(() {
@@ -177,25 +220,23 @@ class _NinosPageState extends State<NinosPage> {
         categoriaSeleccionada = null;
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Guardado correctamente')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Guardado correctamente')));
 
-      // evitar pantalla negra
+      // ir a detalle con lo guardado
       if (mounted) {
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(
-              builder: (context) => const ListaNinosPage()),
+          MaterialPageRoute(builder: (context) => DetalleNinoPage(id: idNino)),
         );
       }
-
     } catch (e) {
       print("ERROR GENERAL: $e");
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error: $e')));
     }
   }
 
@@ -210,8 +251,7 @@ class _NinosPageState extends State<NinosPage> {
           onPressed: () {
             Navigator.push(
               context,
-              MaterialPageRoute(
-                  builder: (context) => const ListaNinosPage()),
+              MaterialPageRoute(builder: (context) => const ListaNinosPage()),
             );
           },
         ),
@@ -222,8 +262,7 @@ class _NinosPageState extends State<NinosPage> {
           children: [
             TextField(
               controller: nombreController,
-              decoration:
-                  const InputDecoration(labelText: 'Nombre completo'),
+              decoration: const InputDecoration(labelText: 'Nombre completo'),
             ),
             TextField(
               controller: bioController,
@@ -278,10 +317,7 @@ class _NinosPageState extends State<NinosPage> {
               value: categoriaSeleccionada,
               hint: const Text('Selecciona carpeta'),
               items: categorias.map((cat) {
-                return DropdownMenuItem(
-                  value: cat,
-                  child: Text(cat),
-                );
+                return DropdownMenuItem(value: cat, child: Text(cat));
               }).toList(),
               onChanged: (value) {
                 setState(() {

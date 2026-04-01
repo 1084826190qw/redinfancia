@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'detalle_nino_page.dart';
 
 class ListaNinosPage extends StatefulWidget {
   const ListaNinosPage({super.key});
@@ -13,6 +14,7 @@ class _ListaNinosPageState extends State<ListaNinosPage> {
 
   List<Map<String, dynamic>> listaNinos = [];
   List<Map<String, dynamic>> filteredNinos = [];
+
   final TextEditingController _searchController = TextEditingController();
 
   @override
@@ -117,6 +119,12 @@ class _ListaNinosPageState extends State<ListaNinosPage> {
                               : const CircleAvatar(child: Icon(Icons.person)),
                           title: Text(nino['nombre'] ?? ''),
                           subtitle: Text(nino['biografia'] ?? ''),
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => DetalleNinoPage(id: nino['id']),
+                            ),
+                          ),
                           trailing: IconButton(
                             icon: const Icon(Icons.delete, color: Colors.red),
                             onPressed: () => eliminarNino(nino['id']),
