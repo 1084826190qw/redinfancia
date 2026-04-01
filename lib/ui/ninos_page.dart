@@ -1,12 +1,12 @@
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 import 'lista_ninos_page.dart';
 import 'package:file_picker/file_picker.dart';
-
-List<Map<String, dynamic>> listaNinos = [];
+import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 
 class NinosPage extends StatefulWidget {
   const NinosPage({super.key});
@@ -17,15 +17,29 @@ class NinosPage extends StatefulWidget {
 
 class _NinosPageState extends State<NinosPage> {
   final supabase = Supabase.instance.client;
+
   File? imagen;
   File? archivo;
+  List<File> documentosEscaneados = [];
+
   String? nombreArchivo;
   final picker = ImagePicker();
 
   final nombreController = TextEditingController();
   final bioController = TextEditingController();
 
-  //  SELECCIONAR IMAGEN
+  String? categoriaSeleccionada;
+
+  final List<String> categorias = [
+    'documentos_personales',
+    'seguimiento',
+    'salud_y_nutricion',
+    'familia_comunidad_y_redes',
+    'componente_pedagogico',
+    'otros'
+  ];
+
+  // 📸 FOTO
   Future<void> seleccionarImagen() async {
     final pickedFile = await picker.pickImage(source: ImageSource.gallery);
 
@@ -36,136 +50,156 @@ class _NinosPageState extends State<NinosPage> {
     }
   }
 
-  //  SUBIR IMAGEN
-  Future<String?> subirImagen(String idNino) async {
-  if (imagen == null) return null;
+  // 📸 ESCANER
+  Future<void> escanearDocumento() async {
+    final pickedFile = await picker.pickImage(
+      source: ImageSource.camera,
+      imageQuality: 80,
+    );
 
-  try {
-    final path = 'ninos/$idNino/foto.jpg';
-
-    await supabase.storage
-        .from('documentos')
-        .upload(path, imagen!);
-
-    final url = supabase.storage
-        .from('documentos')
-        .getPublicUrl(path);
-
-    return url;
-
-  } catch (e) {
-    print("ERROR SUBIENDO IMAGEN: $e");
-    return null; 
+    if (pickedFile != null) {
+      setState(() {
+        documentosEscaneados.add(File(pickedFile.path));
+      });
+    }
   }
-}
-//seleccionar archivo
-Future<void> seleccionarArchivo() async {
-  final result = await FilePicker.platform.pickFiles(
-    type: FileType.custom,
-    allowedExtensions: ['pdf', 'doc', 'docx', 'xls', 'xlsx'],
-  );
 
-  if (result != null) {
-    setState(() {
-      archivo = File(result.files.single.path!);
-      nombreArchivo = result.files.single.name;
-    });
+  // 📁 ARCHIVO
+  Future<void> seleccionarArchivo() async {
+    final result = await FilePicker.platform.pickFiles();
+
+    if (result != null) {
+      setState(() {
+        archivo = File(result.files.single.path!);
+        nombreArchivo = result.files.single.name;
+      });
+    }
   }
-}
-//subir archivo
-Future<String?> subirArchivo(String idNino) async {
-  if (archivo == null) return null;
 
-  try {
-    final path = 'documentos/$idNino/$nombreArchivo';
+  // 🧠 OCR
+  Future<String> extraerTextoCompleto() async {
+    final textRecognizer = TextRecognizer();
+    String textoFinal = "";
 
-    await supabase.storage
-        .from('documentos')
-        .upload(path, archivo!);
+    for (var file in documentosEscaneados) {
+      final inputImage = InputImage.fromFile(file);
+      final recognizedText = await textRecognizer.processImage(inputImage);
+      textoFinal += recognizedText.text + "\n\n";
+    }
 
-    final url = supabase.storage
-        .from('documentos')
-        .getPublicUrl(path);
+    if (archivo != null) {
+      try {
+        final inputImage = InputImage.fromFile(archivo!);
+        final recognizedText =
+            await textRecognizer.processImage(inputImage);
+        textoFinal += recognizedText.text + "\n\n";
+      } catch (_) {
+        print("Archivo no compatible con OCR");
+      }
+    }
 
-    return url;
-
-  } catch (e) {
-    print("ERROR SUBIENDO ARCHIVO: $e");
-    return null;
+    textRecognizer.close();
+    return textoFinal;
   }
-}
-  //  GUARDAR NIÑO
+
+  // 💾 GUARDAR
   Future<void> guardarNino() async {
     if (nombreController.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Ingresa el nombre del niño')),
+        const SnackBar(content: Text('Ingresa el nombre')),
       );
       return;
     }
 
-    final id = const Uuid().v4();
-    String? docUrl;
-    if (archivo != null) {
-      docUrl = await subirArchivo(id);
-    } else {
-      docUrl = null;
+    if (categoriaSeleccionada == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Selecciona carpeta')),
+      );
+      return;
     }
-    
-    String? imageUrl;
-    if (imagen != null) {
-      imageUrl = await subirImagen(id);
-    } else {
-      imageUrl = null;
+
+    if (documentosEscaneados.isEmpty && archivo == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Escanea o sube algo')),
+      );
+      return;
     }
 
     try {
-      final response = await supabase.from('ninos').insert({
-        'id': id,
+      final idNino = const Uuid().v4();
+
+      // 👶 guardar niño
+      await supabase.from('ninos').insert({
+        'id': idNino,
         'nombre': nombreController.text,
         'biografia': bioController.text,
-        'foto': imageUrl,
-        'documento': docUrl,
-      }).select();
+      });
 
-      print("INSERT OK: $response");
+      // 🧠 OCR
+      final texto = await extraerTextoCompleto();
+      print("TEXTO OCR:\n$texto");
 
-      // Limpiar formulario
+      String url = 'SIN_URL';
+
+      // ☁️ intentar subir texto (si falla no rompe)
+      try {
+        final bytes = Uint8List.fromList(texto.codeUnits);
+        final path = '$categoriaSeleccionada/$idNino/documento.txt';
+
+        await supabase.storage
+            .from('documentos')
+            .uploadBinary(path, bytes);
+
+        url = supabase.storage
+            .from('documentos')
+            .getPublicUrl(path);
+
+      } catch (e) {
+        print("ERROR STORAGE (IGNORADO): $e");
+      }
+
+      // 💾 guardar en tabla documentos
+      await supabase.from('documentos').insert({
+        'id_nino': idNino,
+        'nombre_archivo': 'documento.txt',
+        'url': url,
+        'tipo': 'texto',
+        'categoria': categoriaSeleccionada,
+      });
+
+      // limpiar
       setState(() {
         nombreController.clear();
         bioController.clear();
-        imagen = null;
+        documentosEscaneados.clear();
         archivo = null;
         nombreArchivo = null;
+        categoriaSeleccionada = null;
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Niño guardado')),
+        const SnackBar(content: Text('Guardado correctamente')),
       );
 
-      // Recargar la lista
-      await cargarNinos();
+      // 🔥 evitar pantalla negra
+      if (mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+              builder: (context) => const ListaNinosPage()),
+        );
+      }
+
     } catch (e) {
-      print("ERROR INSERT: $e");
+      print("ERROR GENERAL: $e");
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error al guardar: $e')),
+        SnackBar(content: Text('Error: $e')),
       );
     }
   }
-//funcion para cargar los niños desde la base de datos
-Future<void> cargarNinos() async {
-  final data = await supabase
-      .from('ninos')
-      .select()
-      .order('id', ascending: false)
-      .limit(2); 
 
-  setState(() {
-    listaNinos = List<Map<String, dynamic>>.from(data);
-  });
-}
-
-  //  UI
+  // 🎨 UI
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -176,7 +210,8 @@ Future<void> cargarNinos() async {
           onPressed: () {
             Navigator.push(
               context,
-              MaterialPageRoute(builder: (context) => const ListaNinosPage()),
+              MaterialPageRoute(
+                  builder: (context) => const ListaNinosPage()),
             );
           },
         ),
@@ -185,12 +220,11 @@ Future<void> cargarNinos() async {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-
             TextField(
               controller: nombreController,
-              decoration: const InputDecoration(labelText: 'Nombre completo'),
+              decoration:
+                  const InputDecoration(labelText: 'Nombre completo'),
             ),
-
             TextField(
               controller: bioController,
               decoration: const InputDecoration(labelText: 'Biografía'),
@@ -203,8 +237,6 @@ Future<void> cargarNinos() async {
               child: const Text('Seleccionar foto'),
             ),
 
-            const SizedBox(height: 10),
-
             imagen != null
                 ? Image.file(imagen!, height: 100)
                 : const Text('No hay imagen'),
@@ -213,42 +245,56 @@ Future<void> cargarNinos() async {
 
             ElevatedButton(
               onPressed: seleccionarArchivo,
-              child: const Text('Seleccionar documento'),
+              child: const Text('Subir archivo'),
             ),
+
+            archivo != null
+                ? Text('Archivo: $nombreArchivo')
+                : const Text('No hay archivo'),
 
             const SizedBox(height: 10),
 
-            archivo != null
-                ? Text('Documento: $nombreArchivo')
-                : const Text('No hay documento'),
+            ElevatedButton(
+              onPressed: escanearDocumento,
+              child: const Text('Escanear documento'),
+            ),
+
+            documentosEscaneados.isNotEmpty
+                ? SizedBox(
+                    height: 120,
+                    child: ListView.builder(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: documentosEscaneados.length,
+                      itemBuilder: (context, index) {
+                        return Image.file(documentosEscaneados[index]);
+                      },
+                    ),
+                  )
+                : const Text('No hay escaneos'),
+
+            const SizedBox(height: 10),
+
+            DropdownButtonFormField<String>(
+              value: categoriaSeleccionada,
+              hint: const Text('Selecciona carpeta'),
+              items: categorias.map((cat) {
+                return DropdownMenuItem(
+                  value: cat,
+                  child: Text(cat),
+                );
+              }).toList(),
+              onChanged: (value) {
+                setState(() {
+                  categoriaSeleccionada = value;
+                });
+              },
+            ),
 
             const SizedBox(height: 10),
 
             ElevatedButton(
               onPressed: guardarNino,
               child: const Text('Guardar'),
-            ),
-
-            const SizedBox(height: 20),
-            const Text('Niños registrados:', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 10),
-
-            Expanded(
-              child: ListView.builder(
-                itemCount: listaNinos.length,
-                itemBuilder: (context, index) {
-                  final nino = listaNinos[index];
-                  return ListTile(
-                    title: Text(nino['nombre'] ?? ''),
-                    subtitle: Text(nino['biografia'] ?? ''),
-                    leading: nino['foto'] != null
-                        ? CircleAvatar(
-                            backgroundImage: NetworkImage(nino['foto']),
-                          )
-                        : const CircleAvatar(child: Icon(Icons.person)),
-                  );
-                },
-              ),
             ),
           ],
         ),
