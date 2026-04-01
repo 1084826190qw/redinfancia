@@ -39,7 +39,7 @@ class _NinosPageState extends State<NinosPage> {
     'otros'
   ];
 
-  // 📸 FOTO
+  // FOTO
   Future<void> seleccionarImagen() async {
     final pickedFile = await picker.pickImage(source: ImageSource.gallery);
 
@@ -50,7 +50,7 @@ class _NinosPageState extends State<NinosPage> {
     }
   }
 
-  // 📸 ESCANER
+  // ESCANER
   Future<void> escanearDocumento() async {
     final pickedFile = await picker.pickImage(
       source: ImageSource.camera,
@@ -64,7 +64,7 @@ class _NinosPageState extends State<NinosPage> {
     }
   }
 
-  // 📁 ARCHIVO
+  // ARCHIVO
   Future<void> seleccionarArchivo() async {
     final result = await FilePicker.platform.pickFiles();
 
@@ -76,7 +76,7 @@ class _NinosPageState extends State<NinosPage> {
     }
   }
 
-  // 🧠 OCR
+  // OCR
   Future<String> extraerTextoCompleto() async {
     final textRecognizer = TextRecognizer();
     String textoFinal = "";
@@ -128,20 +128,20 @@ class _NinosPageState extends State<NinosPage> {
     try {
       final idNino = const Uuid().v4();
 
-      // 👶 guardar niño
+      // guardar niño
       await supabase.from('ninos').insert({
         'id': idNino,
         'nombre': nombreController.text,
         'biografia': bioController.text,
       });
 
-      // 🧠 OCR
+      // OCR
       final texto = await extraerTextoCompleto();
       print("TEXTO OCR:\n$texto");
 
       String url = 'SIN_URL';
 
-      // ☁️ intentar subir texto (si falla no rompe)
+      // intentar subir texto (si falla no rompe)
       try {
         final bytes = Uint8List.fromList(texto.codeUnits);
         final path = '$categoriaSeleccionada/$idNino/documento.txt';
@@ -158,7 +158,7 @@ class _NinosPageState extends State<NinosPage> {
         print("ERROR STORAGE (IGNORADO): $e");
       }
 
-      // 💾 guardar en tabla documentos
+      // guardar en tabla documentos
       await supabase.from('documentos').insert({
         'id_nino': idNino,
         'nombre_archivo': 'documento.txt',
@@ -181,7 +181,7 @@ class _NinosPageState extends State<NinosPage> {
         const SnackBar(content: Text('Guardado correctamente')),
       );
 
-      // 🔥 evitar pantalla negra
+      // evitar pantalla negra
       if (mounted) {
         Navigator.pushReplacement(
           context,
@@ -199,7 +199,7 @@ class _NinosPageState extends State<NinosPage> {
     }
   }
 
-  // 🎨 UI
+  // UI
   @override
   Widget build(BuildContext context) {
     return Scaffold(
