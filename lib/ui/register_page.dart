@@ -1,50 +1,124 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'ninos_page.dart';
-import 'register_page.dart';
+import 'login_page.dart';
 
-class LoginPage extends StatefulWidget {
-  const LoginPage({super.key});
+class RegisterPage extends StatefulWidget {
+  const RegisterPage({super.key});
 
   @override
-  State<LoginPage> createState() => _LoginPageState();
+  State<RegisterPage> createState() => _RegisterPageState();
 }
 
-class _LoginPageState extends State<LoginPage> {
+class _RegisterPageState extends State<RegisterPage> {
+  final hogarController = TextEditingController();
+  final usernameController = TextEditingController();
   final emailController = TextEditingController();
   final passwordController = TextEditingController();
+  final confirmPasswordController = TextEditingController();
+  bool isLoading = false;
 
-  Future<void> login() async {
-    final supabase = Supabase.instance.client;
+  Future<void> register() async {
+    if (isLoading) return; 
+    if (emailController.text.isEmpty ||
+        passwordController.text.isEmpty ||
+        confirmPasswordController.text.isEmpty) {
+      _showError('Por favor completa todos los campos');
+      return;
+    }
+    
+    if (passwordController.text != confirmPasswordController.text) {
+      _showError('Las contraseñas no coinciden');
+      return;
+    }
+
+    if (passwordController.text.length < 6) {
+      _showError('La contraseña debe tener al menos 6 caracteres');
+      return;
+    }
+    if (hogarController.text.isEmpty) {
+     _showError('Ingresa el hogar comunitario');
+    return;
+    }
+     if (usernameController.text.isEmpty) {
+      _showError('Ingresa un nombre de usuario');
+      return;
+   }
+
+    setState(() => isLoading = true);
 
     try {
-      await supabase.auth.signInWithPassword(
-        email: emailController.text,
+      final supabase = Supabase.instance.client;
+
+      // Registrar usuario en Auth
+      final response = await supabase.auth.signUp(
+        email: emailController.text.trim(),
         password: passwordController.text,
       );
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => NinosPage()),
-      );
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Login exitoso')));
+
+      if (response.user != null) {
+        // Insertar datos en tabla usuarios con columnas correctas
+        await supabase.from('usuarios').insert({
+          'id': response.user!.id,
+          'nombre': usernameController.text.trim(),
+          'correo': emailController.text.trim(),
+          'nombre_hogar': hogarController.text.trim(),
+          'created_at': DateTime.now().toIso8601String(),
+        });
+
+        _showSuccess('Registro exitoso. Inicia sesión');
+        Future.delayed(const Duration(seconds: 2), () {
+          if (mounted) {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (context) => const LoginPage()),
+            );
+          }
+        });
+      }
+    } on AuthException catch (e) {
+      if (e.message.contains('over_email_send_rate_limit')) {
+        _showError('Espera unos minutos antes de intentar de nuevo');
+      } else if (e.message.contains('anonymous_provider_disabled')) {
+        _showError('Configuración de autenticación incorrecta');
+      } else {
+        _showError('Error: ${e.message}');
+      }
     } catch (e) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Error: $e')));
+      _showError('Error: $e');
+    } finally {
+      if (mounted) {
+        setState(() => isLoading = false);
+      }
     }
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red,
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
+  void _showSuccess(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.green,
+        duration: const Duration(seconds: 2),
+      ),
+    );
   }
 
   InputDecoration _inputDecoration({
     required String label,
     required IconData icon,
-    Widget? suffixIcon,
   }) {
     return InputDecoration(
       labelText: label,
       prefixIcon: Icon(icon, color: const Color(0xFF8F88D9)),
-      suffixIcon: suffixIcon,
       filled: true,
       fillColor: const Color(0xFFF8F5FF),
       contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
@@ -110,16 +184,15 @@ class _LoginPageState extends State<LoginPage> {
                             ),
                           ),
                           child: const Icon(
-                            Icons.house_rounded,
+                            Icons.person_add_rounded,
                             color: Colors.white,
                             size: 36,
                           ),
                         ),
                       ),
-                      
                       const SizedBox(height: 24),
                       const Text(
-                        'Bienvenido a Asociación Asoporvenir',
+                        'Crear cuenta',
                         style: TextStyle(
                           fontSize: 27,
                           fontWeight: FontWeight.w700,
@@ -128,17 +201,38 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                       const SizedBox(height: 8),
                       const Text(
-                        'Ingresa para continuar de forma segura a la plataforma.',
+                        'Regístrate para acceder a la plataforma',
                         style: TextStyle(
                           fontSize: 15,
                           height: 1.4,
                           color: Color(0xFF7A7890),
                         ),
                       ),
+                      const SizedBox(height: 16),
+
+TextField(
+  controller: hogarController,
+  enabled: !isLoading,
+  decoration: _inputDecoration(
+    label: 'Hogar comunitario',
+    icon: Icons.home_rounded,
+  ),
+),
+const SizedBox(height: 16),
+
+TextField(
+  controller: usernameController,
+  enabled: !isLoading,
+  decoration: _inputDecoration(
+    label: 'Nombre de usuario',
+    icon: Icons.person_outline_rounded,
+  ),
+),
                       const SizedBox(height: 24),
                       TextField(
                         controller: emailController,
                         keyboardType: TextInputType.emailAddress,
+                        enabled: !isLoading,
                         decoration: _inputDecoration(
                           label: 'Correo electrónico',
                           icon: Icons.mail_outline_rounded,
@@ -148,8 +242,19 @@ class _LoginPageState extends State<LoginPage> {
                       TextField(
                         controller: passwordController,
                         obscureText: true,
+                        enabled: !isLoading,
                         decoration: _inputDecoration(
                           label: 'Contraseña',
+                          icon: Icons.lock_outline_rounded,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      TextField(
+                        controller: confirmPasswordController,
+                        obscureText: true,
+                        enabled: !isLoading,
+                        decoration: _inputDecoration(
+                          label: 'Confirmar contraseña',
                           icon: Icons.lock_outline_rounded,
                         ),
                       ),
@@ -171,7 +276,7 @@ class _LoginPageState extends State<LoginPage> {
                           ],
                         ),
                         child: ElevatedButton(
-                          onPressed: login,
+                          onPressed: isLoading ? null : register,
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.transparent,
                             shadowColor: Colors.transparent,
@@ -179,56 +284,47 @@ class _LoginPageState extends State<LoginPage> {
                               borderRadius: BorderRadius.circular(18),
                             ),
                           ),
-                          child: const Text(
-                            'Ingresar',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.white,
-                            ),
-                          ),
+                          child: isLoading
+                              ? const SizedBox(
+                                  height: 20,
+                                  width: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                      Colors.white,
+                                    ),
+                                  ),
+                                )
+                              : const Text(
+                                  'Registrarse',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.white,
+                                  ),
+                                ),
                         ),
                       ),
                       const SizedBox(height: 24),
-
-Center(
-  child: Column(
-    children: [
-      const Text(
-        '¿No tienes cuenta?',
-        style: TextStyle(
-          fontSize: 14,
-          color: Color(0xFF7A7890),
-        ),
-      ),
-      const SizedBox(height: 6),
-      TextButton(
-        onPressed: () {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (context) => const RegisterPage()),
-          );
-        },
-        child: const Text(
-          'Registrarse',
-          style: TextStyle(
-            fontSize: 15,
-            color: Color(0xFFB39DDB),
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ),
-    ],
-  ),
-),
-                      const SizedBox(height: 16),
-                      const Center(
-                        child: Text(
-                          'Acceso seguro para el equipo de la asociación',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: Color(0xFF9A97AE),
+                      Center(
+                        child: TextButton(
+                          onPressed: isLoading
+                              ? null
+                              : () {
+                                  Navigator.pushReplacement(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) => const LoginPage(),
+                                    ),
+                                  );
+                                },
+                          child: const Text(
+                            '¿Ya tienes cuenta? Inicia sesión',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Color(0xFFB39DDB),
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ),
                       ),
@@ -241,5 +337,15 @@ Center(
         ),
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    hogarController.dispose();
+    usernameController.dispose();
+    emailController.dispose();
+    passwordController.dispose();
+    confirmPasswordController.dispose();
+    super.dispose();
   }
 }
