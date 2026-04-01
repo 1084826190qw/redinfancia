@@ -12,6 +12,8 @@ class _ListaNinosPageState extends State<ListaNinosPage> {
   final supabase = Supabase.instance.client;
 
   List<Map<String, dynamic>> listaNinos = [];
+  List<Map<String, dynamic>> filteredNinos = [];
+  final TextEditingController _searchController = TextEditingController();
 
   @override
   void initState() {
@@ -24,9 +26,26 @@ class _ListaNinosPageState extends State<ListaNinosPage> {
 
     setState(() {
       listaNinos = List<Map<String, dynamic>>.from(data);
+      _filterNinos(_searchController.text);
     });
   }
- 
+
+  void _filterNinos(String query) {
+    setState(() {
+      if (query.isEmpty) {
+        filteredNinos = listaNinos;
+      } else {
+        filteredNinos = listaNinos
+            .where(
+              (nino) => (nino['nombre'] ?? '').toLowerCase().contains(
+                query.toLowerCase(),
+              ),
+            )
+            .toList();
+      }
+    });
+  }
+
   // ELIMINAR NIÑO
   Future<void> eliminarNino(String id) async {
     final confirmar = await showDialog<bool>(
@@ -53,34 +72,62 @@ class _ListaNinosPageState extends State<ListaNinosPage> {
   }
 
   @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Todos los niños')),
-      body: listaNinos.isEmpty
-          ? const Center(child: Text('No hay niños registrados'))
-          : ListView.builder(
-              itemCount: listaNinos.length,
-              itemBuilder: (context, index) {
-                final nino = listaNinos[index];
-
-                return Card(
-                  margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  child: ListTile(
-                    leading: nino['foto'] != null
-                        ? CircleAvatar(
-                            backgroundImage: NetworkImage(nino['foto']),
-                          )
-                        : const CircleAvatar(child: Icon(Icons.person)),
-                    title: Text(nino['nombre'] ?? ''),
-                    subtitle: Text(nino['biografia'] ?? ''),
-                    trailing: IconButton(
-                      icon: const Icon(Icons.delete, color: Colors.red),
-                      onPressed: () => eliminarNino(nino['id']),
-                    ),
-                  ),
-                );
-              },
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: TextField(
+              controller: _searchController,
+              decoration: const InputDecoration(
+                hintText: 'Buscar niño...',
+                prefixIcon: Icon(Icons.search),
+              ),
+              onChanged: _filterNinos,
             ),
+          ),
+          Expanded(
+            child: filteredNinos.isEmpty && _searchController.text.isNotEmpty
+                ? const Center(child: Text('No se encontraron niños'))
+                : filteredNinos.isEmpty
+                ? const Center(child: Text('No hay niños registrados'))
+                : ListView.builder(
+                    itemCount: filteredNinos.length,
+                    itemBuilder: (context, index) {
+                      final nino = filteredNinos[index];
+
+                      return Card(
+                        margin: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
+                        ),
+                        child: ListTile(
+                          leading: nino['foto'] != null
+                              ? CircleAvatar(
+                                  backgroundImage: NetworkImage(nino['foto']),
+                                )
+                              : const CircleAvatar(child: Icon(Icons.person)),
+                          title: Text(nino['nombre'] ?? ''),
+                          subtitle: Text(nino['biografia'] ?? ''),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.delete, color: Colors.red),
+                            onPressed: () => eliminarNino(nino['id']),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
     );
   }
 }
