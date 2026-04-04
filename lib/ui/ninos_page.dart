@@ -6,8 +6,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
-import 'lista_ninos_page.dart';
 import 'detalle_nino_page.dart';
+import 'home_page.dart';
 
 class NinosPage extends StatefulWidget {
   const NinosPage({super.key});
@@ -27,9 +27,12 @@ class _NinosPageState extends State<NinosPage> {
   final picker = ImagePicker();
 
   final nombreController = TextEditingController();
-  final bioController = TextEditingController();
 
+  String? generoSeleccionado;
+  DateTime? fechaNacimiento;
   String? categoriaSeleccionada;
+
+  final List<String> generos = ['Masculino', 'Femenino'];
 
   final List<String> categorias = [
     'documentos_personales',
@@ -111,6 +114,20 @@ class _NinosPageState extends State<NinosPage> {
       return;
     }
 
+    if (generoSeleccionado == null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Selecciona género')));
+      return;
+    }
+
+    if (fechaNacimiento == null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Selecciona fecha de nacimiento')));
+      return;
+    }
+
     if (categoriaSeleccionada == null) {
       ScaffoldMessenger.of(
         context,
@@ -132,7 +149,8 @@ class _NinosPageState extends State<NinosPage> {
       await supabase.from('ninos').insert({
         'id': idNino,
         'nombre': nombreController.text,
-        'biografia': bioController.text,
+        'genero': generoSeleccionado,
+        'fecha_nacimiento': fechaNacimiento?.toIso8601String(),
       });
 
       // OCR
@@ -213,7 +231,8 @@ class _NinosPageState extends State<NinosPage> {
       // limpiar
       setState(() {
         nombreController.clear();
-        bioController.clear();
+        generoSeleccionado = null;
+        fechaNacimiento = null;
         documentosEscaneados.clear();
         archivo = null;
         nombreArchivo = null;
@@ -247,13 +266,11 @@ class _NinosPageState extends State<NinosPage> {
       appBar: AppBar(
         title: const Text('Registro de Niños'),
         leading: IconButton(
-          icon: const Icon(Icons.list),
-          onPressed: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (context) => const ListaNinosPage()),
-            );
-          },
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => const HomePage()),
+          ),
         ),
       ),
       body: Padding(
@@ -264,9 +281,48 @@ class _NinosPageState extends State<NinosPage> {
               controller: nombreController,
               decoration: const InputDecoration(labelText: 'Nombre completo'),
             ),
-            TextField(
-              controller: bioController,
-              decoration: const InputDecoration(labelText: 'Biografía'),
+            DropdownButton<String>(
+              isExpanded: true,
+              hint: const Text('Selecciona género'),
+              value: generoSeleccionado,
+              items: generos.map((String genero) {
+                return DropdownMenuItem<String>(
+                  value: genero,
+                  child: Text(genero),
+                );
+              }).toList(),
+              onChanged: (String? newValue) {
+                setState(() {
+                  generoSeleccionado = newValue;
+                });
+              },
+            ),
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  fechaNacimiento == null
+                      ? 'Fecha de nacimiento'
+                      : 'Fecha: ${fechaNacimiento!.toLocal().toString().split(' ')[0]}',
+                ),
+                ElevatedButton(
+                  onPressed: () async {
+                    final selectedDate = await showDatePicker(
+                      context: context,
+                      initialDate: DateTime.now(),
+                      firstDate: DateTime(1950),
+                      lastDate: DateTime.now(),
+                    );
+                    if (selectedDate != null) {
+                      setState(() {
+                        fechaNacimiento = selectedDate;
+                      });
+                    }
+                  },
+                  child: const Text('Seleccionar'),
+                ),
+              ],
             ),
 
             const SizedBox(height: 10),

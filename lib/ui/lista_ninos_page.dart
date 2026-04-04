@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'detalle_nino_page.dart';
+import 'home_page.dart';
 
 class ListaNinosPage extends StatefulWidget {
   const ListaNinosPage({super.key});
@@ -82,7 +83,16 @@ class _ListaNinosPageState extends State<ListaNinosPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Todos los niños')),
+      appBar: AppBar(
+        title: const Text('Todos los niños'),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => const HomePage()),
+          ),
+        ),
+      ),
       body: Column(
         children: [
           Padding(
@@ -118,7 +128,7 @@ class _ListaNinosPageState extends State<ListaNinosPage> {
                                 )
                               : const CircleAvatar(child: Icon(Icons.person)),
                           title: Text(nino['nombre'] ?? ''),
-                          subtitle: Text(nino['biografia'] ?? ''),
+                          subtitle: Text(nino['genero'] ?? ''),
                           onTap: () => Navigator.push(
                             context,
                             MaterialPageRoute(

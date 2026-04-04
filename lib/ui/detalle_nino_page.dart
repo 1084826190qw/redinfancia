@@ -16,7 +16,8 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
   bool isLoading = true;
   List<Map<String, dynamic>> documentos = [];
   String nombre = '';
-  String biografia = '';
+  String genero = '';
+  String fechaNacimiento = '';
   String categoria = 'Sin categoría';
 
   @override
@@ -47,7 +48,8 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
 
       setState(() {
         nombre = (ninoData['nombre'] ?? '') as String;
-        biografia = (ninoData['biografia'] ?? '') as String;
+        genero = (ninoData['genero'] ?? '') as String;
+        fechaNacimiento = (ninoData['fecha_nacimiento'] ?? '') as String;
         categoria = (ninoData['categoria'] ?? 'Sin categoría') as String;
 
         documentos = List<Map<String, dynamic>>.from(
@@ -80,7 +82,9 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
                   const SizedBox(height: 12),
                   Text('Nombre: $nombre'),
                   const SizedBox(height: 8),
-                  Text('Biografía: $biografia'),
+                  Text('Género: $genero'),
+                  const SizedBox(height: 8),
+                  Text('Fecha de nacimiento: $fechaNacimiento'),
                   const SizedBox(height: 8),
                   Text('Categoría: $categoria'),
                   const SizedBox(height: 16),
