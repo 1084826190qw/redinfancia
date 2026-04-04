@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'detalle_nino_page.dart';
 import 'home_page.dart';
+import 'busqueda_avanzada_page.dart';
 
 class ListaNinosPage extends StatefulWidget {
   const ListaNinosPage({super.key});
@@ -96,6 +97,20 @@ class _ListaNinosPageState extends State<ListaNinosPage> {
             MaterialPageRoute(builder: (_) => const HomePage()),
           ),
         ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.search, color: Color(0xFF4E4A67)),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const BusquedaAvanzadaPage(),
+                ),
+              );
+            },
+            tooltip: 'Búsqueda avanzada',
+          ),
+        ],
       ),
       body: Container(
         decoration: const BoxDecoration(

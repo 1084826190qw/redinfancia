@@ -16,16 +16,37 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
   final supabase = Supabase.instance.client;
   bool isLoading = true;
   List<Map<String, dynamic>> documentos = [];
+  List<Map<String, dynamic>> documentosFiltrados = [];
   String nombre = '';
   String genero = '';
   String fechaNacimiento = '';
   String categoria = 'Sin categoría';
   String fotoUrl = '';
+  String? categoriaDocumentoSeleccionada; // Nueva variable para filtro de categoría
+  final TextEditingController _searchController = TextEditingController();
+
+  // Categorías disponibles para documentos
+  final List<String> categoriasDocumentos = [
+    'Todas las categorías',
+    'documentos_personales',
+    'seguimiento',
+    'salud_y_nutricion',
+    'familia_comunidad_y_redes',
+    'componente_pedagogico',
+    'otros',
+  ];
 
   @override
   void initState() {
     super.initState();
+    categoriaDocumentoSeleccionada = categoriasDocumentos[0]; // "Todas las categorías"
     _cargarDatos();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   Future<void> _cargarDatos() async {
@@ -58,6 +79,9 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
         documentos = List<Map<String, dynamic>>.from(
           docData as List<dynamic>? ?? [],
         );
+        documentosFiltrados = documentos;
+        // Aplicar filtros iniciales
+        _filtrarDocumentos(_searchController.text);
         isLoading = false;
       });
     } catch (e) {
@@ -66,6 +90,208 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
         isLoading = false;
       });
     }
+  }
+
+  void _filtrarDocumentos(String query) {
+    setState(() {
+      if (query.isEmpty && (categoriaDocumentoSeleccionada == null || categoriaDocumentoSeleccionada == categoriasDocumentos[0])) {
+        documentosFiltrados = documentos;
+      } else {
+        final queryLower = query.toLowerCase();
+        documentosFiltrados = documentos.where((documento) {
+          final contenidoTexto = documento['contenido_texto'] as String? ?? '';
+          final nombreArchivo = documento['nombre_archivo'] as String? ?? '';
+          final tipo = documento['tipo'] as String? ?? '';
+          final categoria = documento['categoria'] as String? ?? '';
+
+          // Filtro por categoría
+          if (categoriaDocumentoSeleccionada != null && categoriaDocumentoSeleccionada != categoriasDocumentos[0]) {
+            if (categoria != categoriaDocumentoSeleccionada) {
+              return false;
+            }
+          }
+
+          // Si no hay búsqueda de texto, solo aplicar filtro de categoría
+          if (query.isEmpty) {
+            return true;
+          }
+
+          // Buscar en contenido directo
+          if (contenidoTexto.toLowerCase().contains(queryLower) ||
+              nombreArchivo.toLowerCase().contains(queryLower) ||
+              tipo.toLowerCase().contains(queryLower) ||
+              categoria.toLowerCase().contains(queryLower)) {
+            return true;
+          }
+
+          // Buscar en palabras clave extraídas
+          final palabrasClave = _extraerPalabrasClave(contenidoTexto);
+          return palabrasClave.any((palabra) =>
+              palabra.toLowerCase().contains(queryLower) ||
+              queryLower.contains(palabra.toLowerCase()));
+        }).toList();
+      }
+    });
+  }
+
+  // Función para cambiar la categoría seleccionada
+  void _cambiarCategoriaDocumento(String? nuevaCategoria) {
+    setState(() {
+      categoriaDocumentoSeleccionada = nuevaCategoria;
+    });
+    _filtrarDocumentos(_searchController.text);
+  }
+
+  // Función para formatear nombres de categorías
+  String _formatearNombreCategoria(String categoria) {
+    switch (categoria) {
+      case 'documentos_personales':
+        return 'Documentos Personales';
+      case 'seguimiento':
+        return 'Seguimiento';
+      case 'salud_y_nutricion':
+        return 'Salud y Nutrición';
+      case 'familia_comunidad_y_redes':
+        return 'Familia, Comunidad y Redes';
+      case 'componente_pedagogico':
+        return 'Componente Pedagógico';
+      case 'otros':
+        return 'Otros';
+      case 'Todas las categorías':
+        return 'Todas las categorías';
+      default:
+        return categoria;
+    }
+  }
+
+  // Función para extraer palabras clave del texto OCR
+  List<String> _extraerPalabrasClave(String texto) {
+    if (texto.isEmpty) return [];
+
+    // Convertir a minúsculas y limpiar
+    String textoLimpio = texto.toLowerCase()
+        .replaceAll(RegExp(r'[^\w\sáéíóúñü]'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+
+    // Palabras comunes a excluir
+    final stopWords = {
+      'el', 'la', 'los', 'las', 'de', 'del', 'y', 'a', 'en', 'que', 'es', 'un', 'una',
+      'por', 'con', 'se', 'para', 'como', 'su', 'al', 'lo', 'le', 'me', 'mi', 'tu', 'te',
+      'si', 'no', 'pero', 'o', 'este', 'esta', 'estos', 'estas', 'son', 'fue', 'era'
+    };
+
+    // Dividir en palabras y filtrar
+    List<String> palabras = textoLimpio.split(' ')
+        .where((palabra) => palabra.length > 2)
+        .where((palabra) => !stopWords.contains(palabra))
+        .where((palabra) => !RegExp(r'^\d+$').hasMatch(palabra))
+        .toList();
+
+    // Contar frecuencia
+    Map<String, int> frecuencia = {};
+    for (var palabra in palabras) {
+      frecuencia[palabra] = (frecuencia[palabra] ?? 0) + 1;
+    }
+
+    // Extraer términos compuestos
+    List<String> terminosCompuestos = _extraerTerminosCompuestos(textoLimpio);
+
+    // Combinar y puntuar
+    List<String> todasPalabras = [...frecuencia.keys, ...terminosCompuestos];
+    List<MapEntry<String, double>> puntuadas = todasPalabras.map((palabra) {
+      double puntuacion = (frecuencia[palabra] ?? 1).toDouble();
+      puntuacion *= (palabra.length / 10.0).clamp(0.5, 2.0);
+      if (palabra.contains(' ')) puntuacion *= 1.5;
+      return MapEntry(palabra, puntuacion);
+    }).toList();
+
+    puntuadas.sort((a, b) => b.value.compareTo(a.value));
+    return puntuadas.take(8).map((e) => e.key).toList();
+  }
+
+  // Función para extraer términos compuestos
+  List<String> _extraerTerminosCompuestos(String texto) {
+    List<String> terminos = [];
+    List<String> palabras = texto.split(' ')
+        .where((p) => p.length > 2)
+        .where((p) => !RegExp(r'^\d+$').hasMatch(p))
+        .toList();
+
+    // Bigramas
+    for (int i = 0; i < palabras.length - 1; i++) {
+      String bigrama = '${palabras[i]} ${palabras[i + 1]}';
+      if (bigrama.length > 6 && bigrama.length < 30) {
+        terminos.add(bigrama);
+      }
+    }
+
+    return terminos;
+  }
+
+  // Función para resaltar texto en resultados de búsqueda
+  Widget _buildHighlightedText(String text, String query) {
+    if (query.isEmpty || !text.toLowerCase().contains(query.toLowerCase())) {
+      return Text(
+        text.length > 100 ? '${text.substring(0, 100)}...' : text,
+        style: const TextStyle(
+          fontSize: 12,
+          color: Color(0xFF7A7890),
+        ),
+      );
+    }
+
+    final queryLower = query.toLowerCase();
+    final textLower = text.toLowerCase();
+    final index = textLower.indexOf(queryLower);
+
+    if (index == -1) {
+      return Text(
+        text.length > 100 ? '${text.substring(0, 100)}...' : text,
+        style: const TextStyle(
+          fontSize: 12,
+          color: Color(0xFF7A7890),
+        ),
+      );
+    }
+
+    // Mostrar contexto alrededor de la coincidencia
+    final startContext = (index - 30).clamp(0, text.length);
+    final endContext = (index + query.length + 70).clamp(0, text.length);
+    final contextText = text.substring(startContext, endContext);
+    final matchStart = contextText.toLowerCase().indexOf(queryLower);
+
+    return RichText(
+      text: TextSpan(
+        children: [
+          if (startContext > 0) const TextSpan(text: '...'),
+          TextSpan(
+            text: contextText.substring(0, matchStart),
+            style: const TextStyle(
+              fontSize: 12,
+              color: Color(0xFF7A7890),
+            ),
+          ),
+          TextSpan(
+            text: contextText.substring(matchStart, matchStart + query.length),
+            style: const TextStyle(
+              fontSize: 12,
+              color: Color(0xFFB39DDB),
+              fontWeight: FontWeight.bold,
+              backgroundColor: Color(0x1FB39DDB),
+            ),
+          ),
+          TextSpan(
+            text: contextText.substring(matchStart + query.length),
+            style: const TextStyle(
+              fontSize: 12,
+              color: Color(0xFF7A7890),
+            ),
+          ),
+          if (endContext < text.length) const TextSpan(text: '...'),
+        ],
+      ),
+    );
   }
 
   @override
@@ -251,6 +477,124 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
                               ],
                             ),
                             const SizedBox(height: 20),
+                            // Campo de búsqueda en documentos
+                            Container(
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF8F5FF),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: const Color(0xFFE5DDFB),
+                                ),
+                              ),
+                              child: TextField(
+                                controller: _searchController,
+                                decoration: InputDecoration(
+                                  hintText: 'Buscar en documentos...',
+                                  hintStyle: const TextStyle(
+                                    color: Color(0xFF7A7890),
+                                    fontSize: 14,
+                                  ),
+                                  prefixIcon: const Icon(
+                                    Icons.search,
+                                    color: Color(0xFFB39DDB),
+                                    size: 20,
+                                  ),
+                                  suffixIcon: _searchController.text.isNotEmpty
+                                      ? IconButton(
+                                          icon: const Icon(
+                                            Icons.clear,
+                                            color: Color(0xFFB39DDB),
+                                            size: 20,
+                                          ),
+                                          onPressed: () {
+                                            _searchController.clear();
+                                            _filtrarDocumentos('');
+                                          },
+                                        )
+                                      : null,
+                                  border: InputBorder.none,
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 12,
+                                  ),
+                                ),
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  color: Color(0xFF4E4A67),
+                                ),
+                                onChanged: _filtrarDocumentos,
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            // Selector de categoría de documentos
+                            Container(
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF8F5FF),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: const Color(0xFFE5DDFB),
+                                ),
+                              ),
+                              child: DropdownButtonFormField<String>(
+                                value: categoriaDocumentoSeleccionada,
+                                decoration: const InputDecoration(
+                                  hintText: 'Seleccionar categoría',
+                                  hintStyle: TextStyle(
+                                    color: Color(0xFF7A7890),
+                                    fontSize: 14,
+                                  ),
+                                  prefixIcon: Icon(
+                                    Icons.folder_outlined,
+                                    color: Color(0xFFB39DDB),
+                                    size: 20,
+                                  ),
+                                  border: InputBorder.none,
+                                  contentPadding: EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 12,
+                                  ),
+                                ),
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  color: Color(0xFF4E4A67),
+                                ),
+                                dropdownColor: const Color(0xFFF8F5FF),
+                                items: categoriasDocumentos.map((categoria) {
+                                  return DropdownMenuItem<String>(
+                                    value: categoria,
+                                    child: Text(
+                                      _formatearNombreCategoria(categoria),
+                                      style: const TextStyle(
+                                        fontSize: 14,
+                                        color: Color(0xFF4E4A67),
+                                      ),
+                                    ),
+                                  );
+                                }).toList(),
+                                onChanged: _cambiarCategoriaDocumento,
+                              ),
+                            ),
+                            const SizedBox(height: 20),
+                            // Indicador de resultados
+                            if (documentos.isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 16),
+                                child: Text(
+                                  documentosFiltrados.length == documentos.length &&
+                                          (categoriaDocumentoSeleccionada == null || categoriaDocumentoSeleccionada == categoriasDocumentos[0]) &&
+                                          _searchController.text.isEmpty
+                                      ? 'Mostrando ${documentos.length} documento(s)'
+                                      : documentosFiltrados.length == documentos.length &&
+                                              (categoriaDocumentoSeleccionada != null && categoriaDocumentoSeleccionada != categoriasDocumentos[0])
+                                          ? 'Mostrando ${documentosFiltrados.length} documento(s) en ${_formatearNombreCategoria(categoriaDocumentoSeleccionada!)}'
+                                          : 'Mostrando ${documentosFiltrados.length} de ${documentos.length} documento(s)',
+                                  style: const TextStyle(
+                                    fontSize: 14,
+                                    color: Color(0xFF7A7890),
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
                             if (documentos.isEmpty)
                               Container(
                                 width: double.infinity,
@@ -273,13 +617,43 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
                                   ),
                                 ),
                               )
+                            else if (documentosFiltrados.isEmpty)
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(20),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFFFF8E1),
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(
+                                    color: const Color(0xFFFFD54F),
+                                  ),
+                                ),
+                                child: Center(
+                                  child: Text(
+                                    _searchController.text.isNotEmpty && (categoriaDocumentoSeleccionada == null || categoriaDocumentoSeleccionada == categoriasDocumentos[0])
+                                        ? 'No se encontraron documentos que coincidan con "${_searchController.text}".'
+                                        : categoriaDocumentoSeleccionada != null && categoriaDocumentoSeleccionada != categoriasDocumentos[0] && _searchController.text.isNotEmpty
+                                            ? 'No se encontraron documentos en ${_formatearNombreCategoria(categoriaDocumentoSeleccionada!)} que coincidan con "${_searchController.text}".'
+                                            : categoriaDocumentoSeleccionada != null && categoriaDocumentoSeleccionada != categoriasDocumentos[0]
+                                                ? 'No se encontraron documentos en la categoría ${_formatearNombreCategoria(categoriaDocumentoSeleccionada!)}.'
+                                                : 'No se encontraron documentos que coincidan con la búsqueda.',
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      color: Color(0xFF7A7890),
+                                    ),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                ),
+                              )
                             else
-                              ...documentos.map((documento) {
+                              ...documentosFiltrados.map((documento) {
                                 final tipo = documento['tipo'] as String? ?? '';
                                 final url = documento['url'] as String?;
                                 final nombreArchivo =
                                     documento['nombre_archivo'] as String? ??
                                     'Documento';
+                                final contenidoTexto = documento['contenido_texto'] as String? ?? '';
+                                final categoria = documento['categoria'] as String? ?? 'Sin categoría';
 
                                 return Container(
                                   margin: const EdgeInsets.only(bottom: 16),
@@ -346,12 +720,17 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
                                                 ),
                                                 const SizedBox(height: 4),
                                                 Text(
-                                                  'Tipo: ${tipo.isEmpty ? 'Desconocido' : tipo} • Categoría: ${documento['categoria'] ?? 'Sin categoría'}',
+                                                  'Tipo: ${tipo.isEmpty ? 'Desconocido' : tipo} • Categoría: ${categoria}',
                                                   style: const TextStyle(
                                                     fontSize: 14,
                                                     color: Color(0xFF7A7890),
                                                   ),
                                                 ),
+                                                // Mostrar preview del contenido si hay búsqueda activa
+                                                if (_searchController.text.isNotEmpty && contenidoTexto.isNotEmpty) ...[
+                                                  const SizedBox(height: 8),
+                                                  _buildHighlightedText(contenidoTexto, _searchController.text),
+                                                ],
                                               ],
                                             ),
                                           ),
