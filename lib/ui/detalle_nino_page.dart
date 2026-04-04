@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'lista_ninos_page.dart';
+import 'document_viewer.dart';
 
 class DetalleNinoPage extends StatefulWidget {
   final String id;
@@ -124,19 +125,14 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
                               Text(
                                 'Categoría: ${documento['categoria'] ?? '-'}',
                               ),
-                              Text('Url: ${url ?? '-'}'),
-                              if (tipo == 'imagen' && url != null)
-                                Padding(
-                                  padding: const EdgeInsets.only(top: 8),
-                                  child: Image.network(
-                                    url,
-                                    height: 115,
-                                    fit: BoxFit.cover,
-                                    errorBuilder: (_, __, ___) => const Text(
-                                      'No se pudo mostrar la imagen',
-                                    ),
-                                  ),
-                                ),
+                              const SizedBox(height: 8),
+                              if (url != null && url.isNotEmpty)
+                                DocumentViewer(
+                                  url: url,
+                                  tipo: tipo,
+                                )
+                              else
+                                const Text('URL no disponible'),
                             ],
                           ),
                         ),
