@@ -31,6 +31,10 @@ class _NinosPageState extends State<NinosPage> {
 
   final nombreController = TextEditingController();
 
+  bool get _ocrSoportaTexto => !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS);
+
   String? generoSeleccionado;
   DateTime? fechaNacimiento;
   String? categoriaSeleccionada;
@@ -95,6 +99,27 @@ class _NinosPageState extends State<NinosPage> {
 
   // FOTO
   Future<void> seleccionarImagen() async {
+    if (kIsWeb ||
+        !(defaultTargetPlatform == TargetPlatform.android ||
+            defaultTargetPlatform == TargetPlatform.iOS)) {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.image,
+        withData: kIsWeb,
+        allowMultiple: false,
+      );
+      if (result != null && result.files.isNotEmpty) {
+        final file = result.files.first;
+        setState(() {
+          if (!kIsWeb && file.path != null) {
+            imagen = createFile(file.path!);
+          } else if (file.bytes != null) {
+            imagen = file.bytes;
+          }
+        });
+      }
+      return;
+    }
+
     final pickedFile = await picker.pickImage(source: ImageSource.gallery);
 
     if (pickedFile != null) {
@@ -149,8 +174,8 @@ class _NinosPageState extends State<NinosPage> {
 
   // OCR
   Future<String> extraerTextoCompleto() async {
-    if (kIsWeb) {
-      print("OCR no disponible en Web");
+    if (!_ocrSoportaTexto) {
+      print('OCR no disponible en esta plataforma');
       return '';
     }
 
@@ -234,7 +259,9 @@ class _NinosPageState extends State<NinosPage> {
       String fotoUrl = 'SIN_URL';
       if (imagen != null) {
         try {
-          final bytes = await imagen!.readAsBytes();
+          final bytes = imagen is Uint8List
+              ? imagen as Uint8List
+              : await imagen.readAsBytes();
           final nombreSanitizado = _sanitizarNombreArchivo('foto_perfil.jpg');
           final path = '$categoriaSeleccionada/$idNino/$nombreSanitizado';
 
@@ -254,6 +281,11 @@ class _NinosPageState extends State<NinosPage> {
 
       // OCR
       final texto = await extraerTextoCompleto();
+      if (texto.trim().isEmpty && !_ocrSoportaTexto) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('OCR no disponible en esta plataforma.')),
+        );
+      }
       print("TEXTO OCR:\n$texto");
 
       // guardar archivo OCR (texto) si tiene contenido
@@ -552,7 +584,9 @@ class _NinosPageState extends State<NinosPage> {
                           decoration: BoxDecoration(
                             borderRadius: BorderRadius.circular(16),
                             image: DecorationImage(
-                              image: FileImage(imagen!),
+                              image: imagen is Uint8List
+                                  ? MemoryImage(imagen as Uint8List)
+                                  : FileImage(imagen as dynamic),
                               fit: BoxFit.cover,
                             ),
                           ),
