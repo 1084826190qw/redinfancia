@@ -21,12 +21,13 @@ class _NinosPageState extends State<NinosPage> {
   final supabase = Supabase.instance.client;
 
   dynamic imagen;
-  dynamic archivo;
-  List<dynamic> documentosEscaneados = [];
-  Uint8List? _archivoBytes;
-
-  String? nombreArchivo;
   final picker = ImagePicker();
+
+  // Variables para múltiples archivos
+  final List<dynamic> _archivos = [];
+  final List<Uint8List?> _archivosBytes = [];
+  final List<String?> _nombresArchivos = [];
+  List<dynamic> documentosEscaneados = [];
 
   final nombreController = TextEditingController();
 
@@ -128,15 +129,19 @@ class _NinosPageState extends State<NinosPage> {
   Future<void> seleccionarArchivo() async {
     final result = await FilePicker.platform.pickFiles(
       withData: true,
+      allowMultiple: true, // Permitir selección múltiple
     );
 
-    if (result != null) {
+    if (result != null && result.files.isNotEmpty) {
       setState(() {
-        nombreArchivo = result.files.single.name;
-        _archivoBytes = result.files.single.bytes;
-
-        if (!kIsWeb && result.files.single.path != null) {
-          archivo = createFile(result.files.single.path!);
+        for (final file in result.files) {
+          _nombresArchivos.add(file.name);
+          _archivosBytes.add(file.bytes);
+          if (!kIsWeb && file.path != null) {
+            _archivos.add(createFile(file.path!));
+          } else {
+            _archivos.add(null);
+          }
         }
       });
     }
@@ -158,13 +163,17 @@ class _NinosPageState extends State<NinosPage> {
       textoFinal += recognizedText.text + "\n\n";
     }
 
-    if (archivo != null) {
-      try {
-        final inputImage = InputImage.fromFile(archivo!);
-        final recognizedText = await textRecognizer.processImage(inputImage);
-        textoFinal += recognizedText.text + "\n\n";
-      } catch (_) {
-        print("Archivo no compatible con OCR");
+    // Procesar archivos seleccionados
+    for (int i = 0; i < _archivos.length; i++) {
+      final archivo = _archivos[i];
+      if (archivo != null) {
+        try {
+          final inputImage = InputImage.fromFile(archivo);
+          final recognizedText = await textRecognizer.processImage(inputImage);
+          textoFinal += recognizedText.text + "\n\n";
+        } catch (_) {
+          print("Archivo ${i + 1} no compatible con OCR");
+        }
       }
     }
 
@@ -202,10 +211,10 @@ class _NinosPageState extends State<NinosPage> {
       return;
     }
 
-    if (documentosEscaneados.isEmpty && _archivoBytes == null) {
+    if (documentosEscaneados.isEmpty && _archivosBytes.isEmpty) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Escanea o sube algo')));
+      ).showSnackBar(const SnackBar(content: Text('Escanea o sube al menos un documento')));
       return;
     }
 
@@ -274,32 +283,40 @@ class _NinosPageState extends State<NinosPage> {
         }
       }
 
-      // almacenar archivo subido por el usuario (si existe)
-      String urlArchivo = 'SIN_URL';
-      if (_archivoBytes != null && nombreArchivo != null) {
-        try {
-          final bytes = _archivoBytes!;
-          final nombreSanitizado = _sanitizarNombreArchivo(nombreArchivo!);
-          final path = '$categoriaSeleccionada/$idNino/$nombreSanitizado';
-          print('DEBUG Storage upload path: $path');
-          print('DEBUG nombreArchivo original: $nombreArchivo');
-          print('DEBUG nombreSanitizado: $nombreSanitizado');
+      // almacenar archivos subidos por el usuario
+      for (int i = 0; i < _archivosBytes.length; i++) {
+        final bytes = _archivosBytes[i];
+        final nombreArchivo = _nombresArchivos[i];
+        if (bytes != null && nombreArchivo != null) {
+          try {
+            final nombreSanitizado = _sanitizarNombreArchivo(nombreArchivo);
+            final timestamp = DateTime.now().millisecondsSinceEpoch + i; // Evitar conflictos de nombres
+            final extension = nombreArchivo.contains('.') ? nombreArchivo.split('.').last : '';
+            final nombreConTimestamp = extension.isNotEmpty
+                ? '${nombreSanitizado.replaceAll('.$extension', '')}_$timestamp.$extension'
+                : '${nombreSanitizado}_$timestamp';
 
-          await supabase.storage.from('documentos').uploadBinary(path, bytes);
-          urlArchivo = supabase.storage.from('documentos').getPublicUrl(path);
+            final path = '$categoriaSeleccionada/$idNino/$nombreConTimestamp';
+            print('DEBUG Storage upload path: $path');
+            print('DEBUG nombreArchivo original: $nombreArchivo');
+            print('DEBUG nombreSanitizado: $nombreSanitizado');
 
-          print('DEBUG Intentando insertar archivo en BD...');
-          await supabase.from('documentos').insert({
-            'id_nino': idNino,
-            'nombre_archivo': nombreArchivo, // Mantener el nombre original en BD
-            'url': urlArchivo,
-            'tipo': 'archivo',
-            'categoria': categoriaSeleccionada,
-          });
-          print("✓ Archivo guardado en tabla: $nombreArchivo");
-        } catch (e) {
-          print("❌ ERROR ARCHIVO en BD: $e");
-          print("DEBUG id_nino: $idNino, nombreArchivo: $nombreArchivo, categoria: $categoriaSeleccionada");
+            await supabase.storage.from('documentos').uploadBinary(path, bytes);
+            final urlArchivo = supabase.storage.from('documentos').getPublicUrl(path);
+
+            print('DEBUG Intentando insertar archivo $i en BD...');
+            await supabase.from('documentos').insert({
+              'id_nino': idNino,
+              'nombre_archivo': nombreArchivo, // Mantener el nombre original en BD
+              'url': urlArchivo,
+              'tipo': 'archivo',
+              'categoria': categoriaSeleccionada,
+            });
+            print("✓ Archivo $i guardado en tabla: $nombreArchivo");
+          } catch (e) {
+            print("❌ ERROR ARCHIVO $i en BD: $e");
+            print("DEBUG id_nino: $idNino, nombreArchivo: $nombreArchivo, categoria: $categoriaSeleccionada");
+          }
         }
       }
 
@@ -336,9 +353,9 @@ class _NinosPageState extends State<NinosPage> {
         generoSeleccionado = null;
         fechaNacimiento = null;
         documentosEscaneados.clear();
-        archivo = null;
-        _archivoBytes = null;
-        nombreArchivo = null;
+        _archivos.clear();
+        _archivosBytes.clear();
+        _nombresArchivos.clear();
         categoriaSeleccionada = null;
       });
 
@@ -543,39 +560,60 @@ class _NinosPageState extends State<NinosPage> {
                       ],
                       const SizedBox(height: 16),
                       _ActionButton(
-                        title: 'Subir archivo',
-                        subtitle: 'Selecciona un documento',
+                        title: 'Subir archivos',
+                        subtitle: 'Selecciona múltiples documentos',
                         icon: Icons.attach_file_outlined,
                         onTap: seleccionarArchivo,
                       ),
-                      if (archivo != null && nombreArchivo != null) ...[
+                      if (_nombresArchivos.isNotEmpty) ...[
                         const SizedBox(height: 12),
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF8F5FF),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: const Color(0xFFE5DDFB)),
-                          ),
-                          child: Row(
-                            children: [
-                              const Icon(
-                                Icons.insert_drive_file_outlined,
-                                color: Color(0xFF8F88D9),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Text(
-                                  nombreArchivo!,
-                                  style: const TextStyle(
-                                    fontSize: 14,
-                                    color: Color(0xFF4E4A67),
+                        const Text(
+                          'Archivos seleccionados:',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                        ),
+                        const SizedBox(height: 8),
+                        ...List.generate(_nombresArchivos.length, (index) {
+                          final nombre = _nombresArchivos[index];
+                          if (nombre == null) return const SizedBox.shrink();
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 8),
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF8F5FF),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: const Color(0xFFE5DDFB)),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons.insert_drive_file_outlined,
+                                  color: Color(0xFF8F88D9),
+                                  size: 20,
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    nombre,
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      color: Color(0xFF4E4A67),
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
                                   ),
                                 ),
-                              ),
-                            ],
-                          ),
-                        ),
+                                IconButton(
+                                  icon: const Icon(Icons.delete, size: 16),
+                                  onPressed: () => setState(() {
+                                    _archivos.removeAt(index);
+                                    _archivosBytes.removeAt(index);
+                                    _nombresArchivos.removeAt(index);
+                                  }),
+                                  tooltip: 'Remover archivo',
+                                ),
+                              ],
+                            ),
+                          );
+                        }),
                       ],
                       const SizedBox(height: 16),
                       _ActionButton(
