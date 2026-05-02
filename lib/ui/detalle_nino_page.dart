@@ -74,7 +74,7 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
         genero = (ninoData['genero'] ?? '') as String;
         fechaNacimiento = (ninoData['fecha_nacimiento'] ?? '') as String;
         categoria = (ninoData['categoria'] ?? 'Sin categoría') as String;
-        fotoUrl = (ninoData['foto_url'] ?? '') as String;
+        fotoUrl = (ninoData['foto'] ?? '') as String;
 
         documentos = List<Map<String, dynamic>>.from(
           docData as List<dynamic>? ?? [],

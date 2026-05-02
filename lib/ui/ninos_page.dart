@@ -1,11 +1,12 @@
-import 'dart:io';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
+import '../file_io_stub.dart' if (dart.library.io) '../file_io_io.dart';
 import 'detalle_nino_page.dart';
 import 'home_page.dart';
 
@@ -19,9 +20,10 @@ class NinosPage extends StatefulWidget {
 class _NinosPageState extends State<NinosPage> {
   final supabase = Supabase.instance.client;
 
-  File? imagen;
-  File? archivo;
-  List<File> documentosEscaneados = [];
+  dynamic imagen;
+  dynamic archivo;
+  List<dynamic> documentosEscaneados = [];
+  Uint8List? _archivoBytes;
 
   String? nombreArchivo;
   final picker = ImagePicker();
@@ -43,19 +45,73 @@ class _NinosPageState extends State<NinosPage> {
     'otros',
   ];
 
+  // Función para sanitizar nombres de archivos para Supabase Storage
+  // Función para sanitizar nombres de archivos para Supabase Storage
+  String _sanitizarNombreArchivo(String nombre) {
+    final extensionIndex = nombre.lastIndexOf('.');
+    final extension = extensionIndex >= 0 ? nombre.substring(extensionIndex) : '';
+    final nombreBase = extensionIndex >= 0 ? nombre.substring(0, extensionIndex) : nombre;
+
+    String sanitizado = nombreBase.toLowerCase();
+
+    const reemplazos = {
+      'á': 'a', 'à': 'a', 'ä': 'a', 'â': 'a', 'ã': 'a', 'ª': 'a',
+      'Á': 'a', 'À': 'a', 'Ä': 'a', 'Â': 'a', 'Ã': 'a',
+      'é': 'e', 'è': 'e', 'ë': 'e', 'ê': 'e',
+      'É': 'e', 'È': 'e', 'Ë': 'e', 'Ê': 'e',
+      'í': 'i', 'ì': 'i', 'ï': 'i', 'î': 'i',
+      'Í': 'i', 'Ì': 'i', 'Ï': 'i', 'Î': 'i',
+      'ó': 'o', 'ò': 'o', 'ö': 'o', 'ô': 'o', 'õ': 'o',
+      'Ó': 'o', 'Ò': 'o', 'Ö': 'o', 'Ô': 'o', 'Õ': 'o',
+      'ú': 'u', 'ù': 'u', 'ü': 'u', 'û': 'u',
+      'Ú': 'u', 'Ù': 'u', 'Ü': 'u', 'Û': 'u',
+      'ñ': 'n', 'Ñ': 'n',
+    };
+
+    reemplazos.forEach((key, value) {
+      sanitizado = sanitizado.replaceAll(key, value);
+    });
+
+    sanitizado = sanitizado
+        .replaceAll(RegExp(r'[^a-z0-9._-]+'), '_')
+        .replaceAll(RegExp(r'_+'), '_')
+        .replaceAll(RegExp(r'^_+|_+$'), '');
+
+    if (sanitizado.isEmpty) {
+      sanitizado = 'archivo';
+    }
+
+    final nombreFinal = (sanitizado + extension.toLowerCase());
+
+    if (nombreFinal.length > 100) {
+      final ext = extension.toLowerCase();
+      final base = nombreFinal.substring(0, 100 - ext.length);
+      return '$base$ext';
+    }
+
+    return nombreFinal;
+  }
+
   // FOTO
   Future<void> seleccionarImagen() async {
     final pickedFile = await picker.pickImage(source: ImageSource.gallery);
 
     if (pickedFile != null) {
       setState(() {
-        imagen = File(pickedFile.path);
+        imagen = createFile(pickedFile.path);
       });
     }
   }
 
   // ESCANER
   Future<void> escanearDocumento() async {
+    if (kIsWeb) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Escaneo no disponible en Web. Usa la app móvil.')),
+      );
+      return;
+    }
+
     final pickedFile = await picker.pickImage(
       source: ImageSource.camera,
       imageQuality: 80,
@@ -63,25 +119,36 @@ class _NinosPageState extends State<NinosPage> {
 
     if (pickedFile != null) {
       setState(() {
-        documentosEscaneados.add(File(pickedFile.path));
+        documentosEscaneados.add(createFile(pickedFile.path));
       });
     }
   }
 
   // ARCHIVO
   Future<void> seleccionarArchivo() async {
-    final result = await FilePicker.platform.pickFiles();
+    final result = await FilePicker.platform.pickFiles(
+      withData: true,
+    );
 
     if (result != null) {
       setState(() {
-        archivo = File(result.files.single.path!);
         nombreArchivo = result.files.single.name;
+        _archivoBytes = result.files.single.bytes;
+
+        if (!kIsWeb && result.files.single.path != null) {
+          archivo = createFile(result.files.single.path!);
+        }
       });
     }
   }
 
   // OCR
   Future<String> extraerTextoCompleto() async {
+    if (kIsWeb) {
+      print("OCR no disponible en Web");
+      return '';
+    }
+
     final textRecognizer = TextRecognizer();
     String textoFinal = "";
 
@@ -135,7 +202,7 @@ class _NinosPageState extends State<NinosPage> {
       return;
     }
 
-    if (documentosEscaneados.isEmpty && archivo == null) {
+    if (documentosEscaneados.isEmpty && _archivoBytes == null) {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Escanea o sube algo')));
@@ -151,6 +218,7 @@ class _NinosPageState extends State<NinosPage> {
         'nombre': nombreController.text,
         'genero': generoSeleccionado,
         'fecha_nacimiento': fechaNacimiento?.toIso8601String(),
+        'id_usuario': supabase.auth.currentUser!.id,
       });
 
       // guardar foto del niño (si existe)
@@ -158,16 +226,17 @@ class _NinosPageState extends State<NinosPage> {
       if (imagen != null) {
         try {
           final bytes = await imagen!.readAsBytes();
-          final path = '$categoriaSeleccionada/$idNino/foto_perfil.jpg';
+          final nombreSanitizado = _sanitizarNombreArchivo('foto_perfil.jpg');
+          final path = '$categoriaSeleccionada/$idNino/$nombreSanitizado';
 
           await supabase.storage.from('documentos').uploadBinary(path, bytes);
           fotoUrl = supabase.storage.from('documentos').getPublicUrl(path);
 
           // actualizar el niño con la URL de la foto
-          await supabase
-              .from('ninos')
-              .update({'foto_url': fotoUrl})
-              .eq('id', idNino);
+         await supabase
+    .from('ninos')
+    .update({'foto': fotoUrl})
+    .eq('id', idNino);
           print("✓ Foto del niño guardada: $fotoUrl");
         } catch (e) {
           print("❌ ERROR STORAGE (FOTO): $e");
@@ -182,70 +251,82 @@ class _NinosPageState extends State<NinosPage> {
       String urlTexto = 'SIN_URL';
       if (texto.trim().isNotEmpty) {
         try {
+          
           final bytes = Uint8List.fromList(texto.codeUnits);
-          final path = '$categoriaSeleccionada/$idNino/documento_oculto.txt';
+          final nombreSanitizado = _sanitizarNombreArchivo('documento_oculto.txt');
+          final path = '$categoriaSeleccionada/$idNino/$nombreSanitizado';
 
           await supabase.storage.from('documentos').uploadBinary(path, bytes);
           urlTexto = supabase.storage.from('documentos').getPublicUrl(path);
 
+          print('DEBUG Intentando insertar OCR en BD...');
           await supabase.from('documentos').insert({
             'id_nino': idNino,
-            'nombre_archivo': 'documento_oculto.txt',
+            'nombre_archivo': 'documento_oculto.txt', // Mantener el nombre original en BD
             'url': urlTexto,
             'tipo': 'texto',
             'categoria': categoriaSeleccionada,
+            'contenido_texto': texto.trim(),
           });
           print("✓ Documento OCR guardado en tabla");
         } catch (e) {
-          print("❌ ERROR STORAGE (OCR TEXTO): $e");
+          print("❌ ERROR OCR en BD: $e");
         }
       }
 
       // almacenar archivo subido por el usuario (si existe)
       String urlArchivo = 'SIN_URL';
-      if (archivo != null && nombreArchivo != null) {
+      if (_archivoBytes != null && nombreArchivo != null) {
         try {
-          final bytes = await archivo!.readAsBytes();
-          final path = '$categoriaSeleccionada/$idNino/$nombreArchivo';
+          final bytes = _archivoBytes!;
+          final nombreSanitizado = _sanitizarNombreArchivo(nombreArchivo!);
+          final path = '$categoriaSeleccionada/$idNino/$nombreSanitizado';
+          print('DEBUG Storage upload path: $path');
+          print('DEBUG nombreArchivo original: $nombreArchivo');
+          print('DEBUG nombreSanitizado: $nombreSanitizado');
 
           await supabase.storage.from('documentos').uploadBinary(path, bytes);
           urlArchivo = supabase.storage.from('documentos').getPublicUrl(path);
 
+          print('DEBUG Intentando insertar archivo en BD...');
           await supabase.from('documentos').insert({
             'id_nino': idNino,
-            'nombre_archivo': nombreArchivo,
+            'nombre_archivo': nombreArchivo, // Mantener el nombre original en BD
             'url': urlArchivo,
             'tipo': 'archivo',
             'categoria': categoriaSeleccionada,
           });
           print("✓ Archivo guardado en tabla: $nombreArchivo");
         } catch (e) {
-          print("❌ ERROR STORAGE (ARCHIVO): $e");
+          print("❌ ERROR ARCHIVO en BD: $e");
+          print("DEBUG id_nino: $idNino, nombreArchivo: $nombreArchivo, categoria: $categoriaSeleccionada");
         }
       }
 
       // almacenar documentos escaneados
       for (var i = 0; i < documentosEscaneados.length; i++) {
         final doc = documentosEscaneados[i];
+        String nombreOriginal = 'documento_escaner_${i + 1}.${doc.path.split('.').last}';
         try {
           final bytes = await doc.readAsBytes();
-          final nombreDoc =
-              'documento_escaner_${i + 1}.${doc.path.split('.').last}';
-          final path = '$categoriaSeleccionada/$idNino/$nombreDoc';
+          final nombreSanitizado = _sanitizarNombreArchivo(nombreOriginal);
+          final path = '$categoriaSeleccionada/$idNino/$nombreSanitizado';
 
           await supabase.storage.from('documentos').uploadBinary(path, bytes);
           final urlDoc = supabase.storage.from('documentos').getPublicUrl(path);
 
+          print('DEBUG Intentando insertar escaneo $i en BD...');
           await supabase.from('documentos').insert({
             'id_nino': idNino,
-            'nombre_archivo': nombreDoc,
+            'nombre_archivo': nombreOriginal, // Mantener el nombre original en BD
             'url': urlDoc,
             'tipo': 'imagen',
             'categoria': categoriaSeleccionada,
           });
-          print("✓ Escaneo $i guardado en tabla: $nombreDoc");
+          print("✓ Escaneo $i guardado en tabla: $nombreOriginal");
         } catch (e) {
-          print("❌ ERROR STORAGE (ESCANEO $i): $e");
+          print("❌ ERROR ESCANEO $i en BD: $e");
+          print("DEBUG id_nino: $idNino, nombreOriginal: $nombreOriginal, categoria: $categoriaSeleccionada");
         }
       }
 
@@ -256,9 +337,18 @@ class _NinosPageState extends State<NinosPage> {
         fechaNacimiento = null;
         documentosEscaneados.clear();
         archivo = null;
+        _archivoBytes = null;
         nombreArchivo = null;
         categoriaSeleccionada = null;
       });
+
+      // Verificar que se guardaron documentos
+      final docsVerify = await supabase
+          .from('documentos')
+          .select('id')
+          .eq('id_nino', idNino);
+      
+      print('DEBUG: Documentos verificados en BD: ${(docsVerify as List).length}');
 
       ScaffoldMessenger.of(
         context,

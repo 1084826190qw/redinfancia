@@ -80,12 +80,22 @@ $$ LANGUAGE plpgsql IMMUTABLE;
 -- Actualizar trigger para usar limpieza automática
 CREATE OR REPLACE FUNCTION documentos_contenido_texto_trigger() RETURNS trigger AS $$
 begin
-  -- Limpiar el texto OCR
-  new.contenido_texto := limpiar_texto_ocr(coalesce(new.contenido_texto, ''));
-
-  -- Crear vector de búsqueda
-  new.contenido_texto_tsv :=
-    setweight(to_tsvector('spanish', new.contenido_texto), 'A');
+  -- Solo procesar si hay contenido de texto
+  IF new.contenido_texto IS NOT NULL AND trim(new.contenido_texto) != '' THEN
+    BEGIN
+      -- Crear vector de búsqueda directamente (sin limpieza por ahora)
+      new.contenido_texto_tsv :=
+        setweight(to_tsvector('spanish', new.contenido_texto), 'A');
+    EXCEPTION
+      WHEN OTHERS THEN
+        -- Si hay error, crear vector vacío
+        new.contenido_texto_tsv := ''::tsvector;
+        RAISE NOTICE 'Error creando vector de búsqueda para documento: %', new.id;
+    END;
+  ELSE
+    -- Si no hay contenido, crear vector vacío
+    new.contenido_texto_tsv := ''::tsvector;
+  END IF;
 
   return new;
 end

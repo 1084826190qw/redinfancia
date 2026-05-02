@@ -130,38 +130,31 @@ class _BusquedaAvanzadaPageState extends State<BusquedaAvanzadaPage> {
     });
 
     try {
-      // Buscar documentos que contengan las palabras clave
-      final response = await supabase
-          .from('ninos')
-          .select('''
-            *,
-            documentos!inner(
-              id,
-              tipo,
-              nombre_archivo,
-              contenido_texto,
-              categoria,
-              created_at
-            )
-          ''')
-          .filter('documentos.contenido_texto', 'ilike', '%${query.trim()}%');
+      // Usar búsqueda full-text search para buscar dentro del contenido de documentos
+      final response = await supabase.rpc('buscar_documentos_fts', params: {
+        'query_text': query.trim(),
+        'limit_results': 50,
+      });
 
       // Procesar resultados y extraer palabras clave
       final Map<String, Map<String, dynamic>> ninosUnicos = {};
       final Set<String> todasPalabrasClave = {};
 
-      for (final nino in response) {
+      for (final item in response) {
+        final nino = item['nino'] as Map<String, dynamic>;
+        final documentos = item['documentos'] as List<dynamic>;
         final ninoId = nino['id'];
+
         if (!ninosUnicos.containsKey(ninoId)) {
           ninosUnicos[ninoId] = {
             ...nino,
             'documentos_coincidentes': [],
             'palabras_clave_relevantes': <String>[],
+            'rank_maximo': item['rank'] ?? 0,
           };
         }
 
         // Procesar documentos del niño
-        final documentos = nino['documentos'] as List<dynamic>;
         for (final doc in documentos) {
           if (_documentoCoincideConPalabrasClave(doc, query)) {
             ninosUnicos[ninoId]!['documentos_coincidentes'].add(doc);
@@ -185,8 +178,16 @@ class _BusquedaAvanzadaPageState extends State<BusquedaAvanzadaPage> {
         ninosUnicos[ninoId]!['palabras_clave_relevantes'] = palabrasRelevantes.toSet().toList().take(5).toList();
       }
 
+      // Ordenar por relevancia (rank)
+      final resultadosOrdenados = ninosUnicos.values.toList()
+        ..sort((a, b) {
+          final rankA = a['rank_maximo'] ?? 0;
+          final rankB = b['rank_maximo'] ?? 0;
+          return rankB.compareTo(rankA);
+        });
+
       setState(() {
-        resultados = ninosUnicos.values.toList();
+        resultados = resultadosOrdenados;
         palabrasClaveGlobales = todasPalabrasClave.toList()..sort();
         isLoading = false;
       });
