@@ -53,6 +53,7 @@ class _BusquedaAvanzadaPageState extends State<BusquedaAvanzadaPage> {
       'cumplir', 'ofrecer', 'descubrir', 'levantar', 'acercar', 'separar', 'morar', 'viajar'
     };
 
+
     // Dividir en palabras y filtrar
     List<String> palabras = textoLimpio.split(' ')
         .where((palabra) => palabra.length > 2) // Mínimo 3 caracteres

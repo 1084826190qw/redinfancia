@@ -50,7 +50,7 @@ class AuthGate extends StatefulWidget {
 class _AuthGateState extends State<AuthGate> {
   Session? _session;
   bool _isLoading = true;
-  bool _initialCheckDone = false;
+  bool _isSigningOut = false;
   StreamSubscription<AuthState>? _authSubscription;
 
   @override
@@ -60,38 +60,40 @@ class _AuthGateState extends State<AuthGate> {
   }
 
   Future<void> _initializeAuth() async {
-    // Limpiar cualquier sesión existente al iniciar la app
-    await Supabase.instance.client.auth.signOut();
-
-    // Esperar un momento para que se complete el signOut
-    await Future.delayed(const Duration(milliseconds: 200));
-
     _authSubscription = Supabase.instance.client.auth.onAuthStateChange.listen(
       (data) {
-        print('Auth state changed: ${data.event}');
+        print('Auth state changed: ${data.event}, session: ${data.session}');
+        if (!mounted) return;
+
+        if (_isSigningOut && data.event == AuthChangeEvent.initialSession) {
+          return;
+        }
+
         setState(() {
           _session = data.session;
           _isLoading = false;
-          _initialCheckDone = true;
+          _isSigningOut = false;
         });
       },
       onError: (error) {
         print('Auth error: $error');
+        if (!mounted) return;
         setState(() {
           _isLoading = false;
-          _initialCheckDone = true;
+          _isSigningOut = false;
         });
       },
     );
 
-    // Forzar que termine la carga después de un tiempo
-    Future.delayed(const Duration(milliseconds: 1000), () {
-      if (mounted && _isLoading) {
-        setState(() {
-          _isLoading = false;
-          _initialCheckDone = true;
-        });
-      }
+    _isSigningOut = true;
+    await Supabase.instance.client.auth.signOut();
+
+    Future.delayed(const Duration(seconds: 2), () {
+      if (!mounted || !_isLoading) return;
+      setState(() {
+        _isLoading = false;
+        _isSigningOut = false;
+      });
     });
   }
 
