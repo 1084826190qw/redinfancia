@@ -1186,6 +1186,10 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
                                         DocumentViewer(
                                           url: url,
                                           tipo: tipo,
+                                          nino: nombre, // Usar la variable nombre cargada
+                                          categoria: categoria,
+                                          fileName: nombreArchivo,
+                                          bucket: 'documentos', // Usar la categoria como bucket
                                         ),
                                       ],
                                     ],
