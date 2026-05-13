@@ -12,6 +12,7 @@ class DocumentViewer extends StatefulWidget {
   final String? categoria;
   final String? fileName;
   final String? bucket;
+  final String? contenidoTexto;
 
   const DocumentViewer({
     super.key,
@@ -21,6 +22,7 @@ class DocumentViewer extends StatefulWidget {
     this.categoria,
     this.fileName,
     this.bucket,
+    this.contenidoTexto,
   });
 
   @override
@@ -148,7 +150,49 @@ class _DocumentViewerState extends State<DocumentViewer> {
     }
   }
 
-  Widget imagen() => Image.network(widget.url);
+  Widget imagen() {
+    // Si hay texto OCR disponible, mostrar el texto en lugar de la imagen
+    if (widget.contenidoTexto != null && widget.contenidoTexto!.trim().isNotEmpty) {
+      return textoOcr();
+    }
+
+    // Si no hay texto OCR, mostrar el botón para abrir la imagen
+    return Column(
+      children: [
+        const Icon(
+          Icons.image,
+          size: 48,
+          color: Color(0xFFB39DDB),
+        ),
+        const SizedBox(height: 12),
+        const Text(
+          "Imagen disponible",
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF4E4A67),
+          ),
+        ),
+        const SizedBox(height: 16),
+        ElevatedButton.icon(
+          onPressed: abrirEnNavegador,
+          icon: const Icon(Icons.open_in_browser),
+          label: const Text("Abrir imagen"),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFFB39DDB),
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 24,
+              vertical: 12,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 
   Widget texto() {
     return FutureBuilder(
@@ -161,6 +205,68 @@ class _DocumentViewerState extends State<DocumentViewer> {
           child: SingleChildScrollView(child: Text(data.body)),
         );
       },
+    );
+  }
+
+  Widget textoOcr() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8F5FF),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE5DDFB)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.text_fields,
+                color: Color(0xFFB39DDB),
+                size: 24,
+              ),
+              const SizedBox(width: 8),
+              const Text(
+                "Texto extraído de la imagen",
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF4E4A67),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 300,
+            child: SingleChildScrollView(
+              child: Text(
+                widget.contenidoTexto!,
+                style: const TextStyle(
+                  fontSize: 14,
+                  color: Color(0xFF4E4A67),
+                  height: 1.5,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton.icon(
+                onPressed: abrirEnNavegador,
+                icon: const Icon(Icons.open_in_browser, size: 16),
+                label: const Text("Ver imagen original"),
+                style: TextButton.styleFrom(
+                  foregroundColor: const Color(0xFFB39DDB),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 

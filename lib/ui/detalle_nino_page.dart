@@ -1,10 +1,14 @@
+import 'dart:io';
 import 'dart:typed_data';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:tesseract_ocr/tesseract_ocr.dart';
+import 'package:path_provider/path_provider.dart';
 import '../file_io_stub.dart' if (dart.library.io) '../file_io_io.dart';
 import 'lista_ninos_page.dart';
 import 'document_viewer.dart';
@@ -28,17 +32,62 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
   String fechaNacimiento = '';
   String categoria = 'Sin categoría';
   String fotoUrl = '';
-  String? categoriaDocumentoSeleccionada; // Nueva variable para filtro de categoría
+  String? categoriaDocumentoSeleccionada;
   final TextEditingController _searchController = TextEditingController();
 
-  // Variables para múltiples archivos
   final List<dynamic> _archivosNuevos = [];
   final List<Uint8List?> _archivosNuevosBytes = [];
   final List<String?> _nombresArchivosNuevos = [];
-  String? _categoriaArchivosNuevos; // Categoría común para todos los archivos
+  String? _categoriaArchivosNuevos;
   final ImagePicker _picker = ImagePicker();
 
-  // Categorías disponibles para documentos
+  // ✅ OCR disponible en Android/iOS/Linux (desktop)
+  bool get _ocrDisponible =>
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS ||
+          defaultTargetPlatform == TargetPlatform.linux);
+
+  // ✅ Función helper para extraer texto OCR según la plataforma
+  Future<String> _extraerTextoOCR(dynamic archivo) async {
+    try {
+      if (defaultTargetPlatform == TargetPlatform.linux) {
+        // Usar Tesseract OCR en Linux
+        Uint8List bytes;
+        if (archivo is Uint8List) {
+          bytes = archivo;
+        } else {
+          bytes = await archivo.readAsBytes();
+        }
+
+        // Crear archivo temporal para Tesseract
+        final tempDir = await getTemporaryDirectory();
+        final tempFile = File('${tempDir.path}/temp_image_${DateTime.now().millisecondsSinceEpoch}.png');
+        await tempFile.writeAsBytes(bytes);
+
+        try {
+          final texto = await TesseractOcr.extractText(tempFile.path);
+          return texto ?? '';
+        } finally {
+          // Limpiar archivo temporal
+          if (await tempFile.exists()) {
+            await tempFile.delete();
+          }
+        }
+      } else {
+        // Usar Google ML Kit en Android/iOS
+        final textRecognizer = TextRecognizer();
+        final inputImage = InputImage.fromFile(archivo);
+        final recognizedText = await textRecognizer.processImage(inputImage);
+        textRecognizer.close();
+        return recognizedText.text;
+      }
+    } catch (e) {
+      print('Error OCR: $e');
+      return '';
+    }
+  }
+
   final List<String> categoriasDocumentos = [
     'Todas las categorías',
     'documentos_personales',
@@ -52,7 +101,7 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
   @override
   void initState() {
     super.initState();
-    categoriaDocumentoSeleccionada = categoriasDocumentos[0]; // "Todas las categorías"
+    categoriaDocumentoSeleccionada = categoriasDocumentos[0];
     _cargarDatos();
   }
 
@@ -63,10 +112,7 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
   }
 
   Future<void> _cargarDatos() async {
-    setState(() {
-      isLoading = true;
-    });
-
+    setState(() => isLoading = true);
     try {
       final ninoData = await supabase
           .from('ninos')
@@ -88,27 +134,21 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
         fechaNacimiento = (ninoData['fecha_nacimiento'] ?? '') as String;
         categoria = (ninoData['categoria'] ?? 'Sin categoría') as String;
         fotoUrl = (ninoData['foto'] ?? '') as String;
-
-        documentos = List<Map<String, dynamic>>.from(
-          docData as List<dynamic>? ?? [],
-        );
+        documentos = List<Map<String, dynamic>>.from(docData as List<dynamic>? ?? []);
         documentosFiltrados = documentos;
-        // Aplicar filtros iniciales
         _filtrarDocumentos(_searchController.text);
         isLoading = false;
       });
     } catch (e) {
       print("❌ ERROR al cargar datos: $e");
-      setState(() {
-        isLoading = false;
-      });
+      setState(() => isLoading = false);
     }
   }
 
   Future<void> _seleccionarArchivoNuevo(StateSetter setDialogState) async {
     final result = await FilePicker.platform.pickFiles(
       withData: true,
-      allowMultiple: true, // Permitir selección múltiple
+      allowMultiple: true,
     );
     if (result != null && result.files.isNotEmpty) {
       setDialogState(() {
@@ -128,28 +168,25 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
   Future<void> _escanearDocumentoNuevo(StateSetter setDialogState) async {
     if (kIsWeb) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Escaneo no disponible en Web. Usa la app móvil.')),
+        const SnackBar(content: Text('Escaneo no disponible en Web.')),
       );
       return;
     }
-
-    // Verificar si estamos en Linux (donde no hay soporte nativo para cámara)
     if (!kIsWeb && Theme.of(context).platform == TargetPlatform.linux) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Escaneo no disponible en Linux. Usa la app móvil (Android/iOS).')),
+        const SnackBar(content: Text('Escaneo no disponible en Linux.')),
       );
       return;
     }
-
     try {
       final pickedFile = await _picker.pickImage(
         source: ImageSource.camera,
         imageQuality: 80,
       );
-
       if (pickedFile != null) {
         setDialogState(() {
-          final nombreArchivo = 'documento_escaner_${DateTime.now().millisecondsSinceEpoch}.jpg';
+          final nombreArchivo =
+              'documento_escaner_${DateTime.now().millisecondsSinceEpoch}.jpg';
           _nombresArchivosNuevos.add(nombreArchivo);
           if (!kIsWeb && pickedFile.path != null) {
             _archivosNuevos.add(createFile(pickedFile.path));
@@ -158,11 +195,55 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
         });
       }
     } catch (e) {
-      print('Error al escanear documento: $e');
+      print('Error al escanear: $e');
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Error al acceder a la cámara. Verifica los permisos.')),
+        const SnackBar(content: Text('Error al acceder a la cámara.')),
       );
     }
+  }
+
+  // ✅ OCR para archivos de imagen seleccionados desde el explorador
+  Future<String> _extraerTextoDeArchivos() async {
+    if (!_ocrDisponible) {
+      print('OCR no disponible en esta plataforma');
+      return '';
+    }
+
+    String textoFinal = '';
+    bool primerError = true;
+
+    for (int i = 0; i < _archivosNuevos.length; i++) {
+      final archivo = _archivosNuevos[i];
+      if (archivo == null) continue;
+
+      final nombre = _nombresArchivosNuevos[i] ?? '';
+      final extension = nombre.split('.').last.toLowerCase();
+      final esImagen = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].contains(extension);
+
+      if (!esImagen) continue; // Solo procesar imágenes
+
+      try {
+        final texto = await _extraerTextoOCR(archivo);
+        if (texto.trim().isNotEmpty) {
+          textoFinal += texto + '\n\n';
+          print('✓ OCR extraído de $nombre: ${texto.length} chars');
+        }
+      } catch (e) {
+        print('Error OCR en $nombre: $e');
+        // Mostrar mensaje al usuario solo en el primer error
+        if (primerError && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Error al procesar OCR. Las imágenes se guardarán sin extraer texto.'),
+              duration: Duration(seconds: 3),
+            ),
+          );
+          primerError = false;
+        }
+      }
+    }
+
+    return textoFinal.trim();
   }
 
   String _sanitizarNombreArchivo(String nombre) {
@@ -194,17 +275,13 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
         .replaceAll(RegExp(r'_+'), '_')
         .replaceAll(RegExp(r'^_+|_+$'), '');
 
-    if (sanitizado.isEmpty) {
-      sanitizado = 'archivo';
-    }
+    if (sanitizado.isEmpty) sanitizado = 'archivo';
 
-    final nombreFinal = (sanitizado + extension.toLowerCase());
+    final nombreFinal = sanitizado + extension.toLowerCase();
     if (nombreFinal.length > 100) {
       final ext = extension.toLowerCase();
-      final base = nombreFinal.substring(0, 100 - ext.length);
-      return '$base$ext';
+      return '${nombreFinal.substring(0, 100 - ext.length)}$ext';
     }
-
     return nombreFinal;
   }
 
@@ -213,9 +290,7 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
     if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].contains(extension)) {
       return 'imagen';
     }
-    if (extension == 'txt') {
-      return 'texto';
-    }
+    if (extension == 'txt') return 'texto';
     return 'archivo';
   }
 
@@ -250,35 +325,42 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
     int archivosSubidos = 0;
 
     try {
+      // ✅ Ejecutar OCR ANTES de subir los archivos
+      final textoOcr = await _extraerTextoDeArchivos();
+      print('OCR total extraído: ${textoOcr.length} chars');
+
       for (int i = 0; i < _nombresArchivosNuevos.length; i++) {
         final nombreArchivo = _nombresArchivosNuevos[i];
         if (nombreArchivo == null) continue;
 
         final tipo = _determinarTipoPorExtension(nombreArchivo);
         final nombreSanitizado = _sanitizarNombreArchivo(nombreArchivo);
-
-        // Agregar timestamp único para evitar duplicados
-        final timestamp = DateTime.now().millisecondsSinceEpoch + i; // Agregar i para diferenciar archivos
+        final timestamp = DateTime.now().millisecondsSinceEpoch + i;
         final extension = nombreArchivo.contains('.') ? nombreArchivo.split('.').last : '';
         final nombreConTimestamp = extension.isNotEmpty
             ? '${nombreSanitizado.replaceAll('.$extension', '')}_$timestamp.$extension'
             : '${nombreSanitizado}_$timestamp';
 
         final path = '$categoria/${widget.id}/$nombreConTimestamp';
-
         final bytes = _archivosNuevosBytes[i] ?? await _archivosNuevos[i]?.readAsBytes();
+
         if (bytes != null) {
           await supabase.storage.from('documentos').uploadBinary(path, bytes);
           final url = supabase.storage.from('documentos').getPublicUrl(path);
 
+          // ✅ Guardar con contenido_texto si hay OCR extraído (cualquier tipo de archivo)
           await supabase.from('documentos').insert({
             'id_nino': widget.id,
             'nombre_archivo': nombreArchivo,
             'url': url,
             'tipo': tipo,
             'categoria': categoria,
+            // Agregar OCR si hay texto extraído (principalmente de imágenes)
+            if (textoOcr.isNotEmpty)
+              'contenido_texto': textoOcr,
           });
 
+          print('✓ Archivo guardado: $nombreArchivo (tipo: $tipo)');
           archivosSubidos++;
         }
       }
@@ -291,9 +373,7 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
       });
 
       await _cargarDatos();
-      if (mounted) {
-        Navigator.pop(dialogContext);
-      }
+      if (mounted) Navigator.pop(dialogContext);
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('$archivosSubidos documento(s) agregado(s) correctamente')),
@@ -335,9 +415,7 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
 
     if (confirmar != true) return;
 
-    setState(() {
-      isLoading = true;
-    });
+    setState(() => isLoading = true);
 
     try {
       if (url != null && url.isNotEmpty) {
@@ -349,16 +427,14 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
       await supabase.from('documentos').delete().eq('id', documentoId);
       await _cargarDatos();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Documento eliminado')), 
+        const SnackBar(content: Text('Documento eliminado')),
       );
     } catch (e) {
       print('❌ ERROR al eliminar documento: $e');
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error al eliminar documento: $e')), 
+        SnackBar(content: Text('Error al eliminar documento: $e')),
       );
-      setState(() {
-        isLoading = false;
-      });
+      setState(() => isLoading = false);
     }
   }
 
@@ -385,17 +461,14 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
                         labelText: 'Categoría (para todos los documentos)',
                       ),
                       items: categoriasDocumentos
-                          .where((categoria) => categoria != 'Todas las categorías')
-                          .map((categoria) {
-                        return DropdownMenuItem<String>(
-                          value: categoria,
-                          child: Text(_formatearNombreCategoria(categoria)),
-                        );
-                      }).toList(),
+                          .where((c) => c != 'Todas las categorías')
+                          .map((c) => DropdownMenuItem<String>(
+                                value: c,
+                                child: Text(_formatearNombreCategoria(c)),
+                              ))
+                          .toList(),
                       onChanged: (value) {
-                        setDialogState(() {
-                          _categoriaArchivosNuevos = value;
-                        });
+                        setDialogState(() => _categoriaArchivosNuevos = value);
                       },
                     ),
                     const SizedBox(height: 16),
@@ -442,7 +515,8 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
                               ),
                               IconButton(
                                 icon: const Icon(Icons.delete, size: 20),
-                                onPressed: () => _removerArchivo(index, setDialogState),
+                                onPressed: () =>
+                                    _removerArchivo(index, setDialogState),
                                 tooltip: 'Remover archivo',
                               ),
                             ],
@@ -459,7 +533,9 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
                   child: const Text('Cancelar'),
                 ),
                 ElevatedButton(
-                  onPressed: _nombresArchivosNuevos.isNotEmpty ? () => _guardarDocumentoNuevo(context) : null,
+                  onPressed: _nombresArchivosNuevos.isNotEmpty
+                      ? () => _guardarDocumentoNuevo(context)
+                      : null,
                   child: const Text('Guardar'),
                 ),
               ],
@@ -472,7 +548,9 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
 
   void _filtrarDocumentos(String query) {
     setState(() {
-      if (query.isEmpty && (categoriaDocumentoSeleccionada == null || categoriaDocumentoSeleccionada == categoriasDocumentos[0])) {
+      if (query.isEmpty &&
+          (categoriaDocumentoSeleccionada == null ||
+              categoriaDocumentoSeleccionada == categoriasDocumentos[0])) {
         documentosFiltrados = documentos;
       } else {
         final queryLower = query.toLowerCase();
@@ -480,115 +558,87 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
           final contenidoTexto = documento['contenido_texto'] as String? ?? '';
           final nombreArchivo = documento['nombre_archivo'] as String? ?? '';
           final tipo = documento['tipo'] as String? ?? '';
-          final categoria = documento['categoria'] as String? ?? '';
+          final cat = documento['categoria'] as String? ?? '';
 
-          // Filtro por categoría
-          if (categoriaDocumentoSeleccionada != null && categoriaDocumentoSeleccionada != categoriasDocumentos[0]) {
-            if (categoria != categoriaDocumentoSeleccionada) {
-              return false;
-            }
+          if (categoriaDocumentoSeleccionada != null &&
+              categoriaDocumentoSeleccionada != categoriasDocumentos[0]) {
+            if (cat != categoriaDocumentoSeleccionada) return false;
           }
 
-          // Si no hay búsqueda de texto, solo aplicar filtro de categoría
-          if (query.isEmpty) {
-            return true;
-          }
+          if (query.isEmpty) return true;
 
-          // Buscar en contenido directo
           if (contenidoTexto.toLowerCase().contains(queryLower) ||
               nombreArchivo.toLowerCase().contains(queryLower) ||
               tipo.toLowerCase().contains(queryLower) ||
-              categoria.toLowerCase().contains(queryLower)) {
+              cat.toLowerCase().contains(queryLower)) {
             return true;
           }
 
-          // Buscar en palabras clave extraídas
           final palabrasClave = _extraerPalabrasClave(contenidoTexto);
-          return palabrasClave.any((palabra) =>
-              palabra.toLowerCase().contains(queryLower) ||
-              queryLower.contains(palabra.toLowerCase()));
+          return palabrasClave.any((p) =>
+              p.toLowerCase().contains(queryLower) ||
+              queryLower.contains(p.toLowerCase()));
         }).toList();
       }
     });
   }
 
-  // Función para cambiar la categoría seleccionada
   void _cambiarCategoriaDocumento(String? nuevaCategoria) {
-    setState(() {
-      categoriaDocumentoSeleccionada = nuevaCategoria;
-    });
+    setState(() => categoriaDocumentoSeleccionada = nuevaCategoria);
     _filtrarDocumentos(_searchController.text);
   }
 
-  // Función para formatear nombres de categorías
   String _formatearNombreCategoria(String categoria) {
     switch (categoria) {
-      case 'documentos_personales':
-        return 'Documentos Personales';
-      case 'seguimiento':
-        return 'Seguimiento';
-      case 'salud_y_nutricion':
-        return 'Salud y Nutrición';
-      case 'familia_comunidad_y_redes':
-        return 'Familia, Comunidad y Redes';
-      case 'componente_pedagogico':
-        return 'Componente Pedagógico';
-      case 'otros':
-        return 'Otros';
-      case 'Todas las categorías':
-        return 'Todas las categorías';
-      default:
-        return categoria;
+      case 'documentos_personales': return 'Documentos Personales';
+      case 'seguimiento': return 'Seguimiento';
+      case 'salud_y_nutricion': return 'Salud y Nutrición';
+      case 'familia_comunidad_y_redes': return 'Familia, Comunidad y Redes';
+      case 'componente_pedagogico': return 'Componente Pedagógico';
+      case 'otros': return 'Otros';
+      case 'Todas las categorías': return 'Todas las categorías';
+      default: return categoria;
     }
   }
 
-  // Función para extraer palabras clave del texto OCR
   List<String> _extraerPalabrasClave(String texto) {
     if (texto.isEmpty) return [];
-
-    // Convertir a minúsculas y limpiar
     String textoLimpio = texto.toLowerCase()
         .replaceAll(RegExp(r'[^\w\sáéíóúñü]'), ' ')
         .replaceAll(RegExp(r'\s+'), ' ')
         .trim();
 
-    // Palabras comunes a excluir
     final stopWords = {
-      'el', 'la', 'los', 'las', 'de', 'del', 'y', 'a', 'en', 'que', 'es', 'un', 'una',
-      'por', 'con', 'se', 'para', 'como', 'su', 'al', 'lo', 'le', 'me', 'mi', 'tu', 'te',
-      'si', 'no', 'pero', 'o', 'este', 'esta', 'estos', 'estas', 'son', 'fue', 'era'
+      'el', 'la', 'los', 'las', 'de', 'del', 'y', 'a', 'en', 'que', 'es',
+      'un', 'una', 'por', 'con', 'se', 'para', 'como', 'su', 'al', 'lo',
+      'le', 'me', 'mi', 'tu', 'te', 'si', 'no', 'pero', 'o', 'este', 'esta',
+      'estos', 'estas', 'son', 'fue', 'era'
     };
 
-    // Dividir en palabras y filtrar
     List<String> palabras = textoLimpio.split(' ')
-        .where((palabra) => palabra.length > 2)
-        .where((palabra) => !stopWords.contains(palabra))
-        .where((palabra) => !RegExp(r'^\d+$').hasMatch(palabra))
+        .where((p) => p.length > 2)
+        .where((p) => !stopWords.contains(p))
+        .where((p) => !RegExp(r'^\d+$').hasMatch(p))
         .toList();
 
-    // Contar frecuencia
     Map<String, int> frecuencia = {};
-    for (var palabra in palabras) {
-      frecuencia[palabra] = (frecuencia[palabra] ?? 0) + 1;
+    for (var p in palabras) {
+      frecuencia[p] = (frecuencia[p] ?? 0) + 1;
     }
 
-    // Extraer términos compuestos
     List<String> terminosCompuestos = _extraerTerminosCompuestos(textoLimpio);
-
-    // Combinar y puntuar
-    List<String> todasPalabras = [...frecuencia.keys, ...terminosCompuestos];
-    List<MapEntry<String, double>> puntuadas = todasPalabras.map((palabra) {
-      double puntuacion = (frecuencia[palabra] ?? 1).toDouble();
-      puntuacion *= (palabra.length / 10.0).clamp(0.5, 2.0);
-      if (palabra.contains(' ')) puntuacion *= 1.5;
-      return MapEntry(palabra, puntuacion);
+    List<String> todas = [...frecuencia.keys, ...terminosCompuestos];
+    List<MapEntry<String, double>> puntuadas = todas.map((p) {
+      double puntuacion = (frecuencia[p] ?? 1).toDouble();
+      puntuacion *= (p.length / 10.0).clamp(0.5, 2.0);
+      if (p.contains(' ')) puntuacion *= 1.5;
+      return MapEntry(p, puntuacion);
     }).toList();
 
     puntuadas.sort((a, b) => b.value.compareTo(a.value));
     return puntuadas.take(8).map((e) => e.key).toList();
   }
 
-  // Función para extraer términos compuestos
   List<String> _extraerTerminosCompuestos(String texto) {
     List<String> terminos = [];
     List<String> palabras = texto.split(' ')
@@ -596,44 +646,31 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
         .where((p) => !RegExp(r'^\d+$').hasMatch(p))
         .toList();
 
-    // Bigramas
     for (int i = 0; i < palabras.length - 1; i++) {
       String bigrama = '${palabras[i]} ${palabras[i + 1]}';
-      if (bigrama.length > 6 && bigrama.length < 30) {
-        terminos.add(bigrama);
-      }
+      if (bigrama.length > 6 && bigrama.length < 30) terminos.add(bigrama);
     }
-
     return terminos;
   }
 
-  // Función para resaltar texto en resultados de búsqueda
   Widget _buildHighlightedText(String text, String query) {
     if (query.isEmpty || !text.toLowerCase().contains(query.toLowerCase())) {
       return Text(
         text.length > 100 ? '${text.substring(0, 100)}...' : text,
-        style: const TextStyle(
-          fontSize: 12,
-          color: Color(0xFF7A7890),
-        ),
+        style: const TextStyle(fontSize: 12, color: Color(0xFF7A7890)),
       );
     }
 
     final queryLower = query.toLowerCase();
     final textLower = text.toLowerCase();
     final index = textLower.indexOf(queryLower);
-
     if (index == -1) {
       return Text(
         text.length > 100 ? '${text.substring(0, 100)}...' : text,
-        style: const TextStyle(
-          fontSize: 12,
-          color: Color(0xFF7A7890),
-        ),
+        style: const TextStyle(fontSize: 12, color: Color(0xFF7A7890)),
       );
     }
 
-    // Mostrar contexto alrededor de la coincidencia
     final startContext = (index - 30).clamp(0, text.length);
     final endContext = (index + query.length + 70).clamp(0, text.length);
     final contextText = text.substring(startContext, endContext);
@@ -645,10 +682,7 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
           if (startContext > 0) const TextSpan(text: '...'),
           TextSpan(
             text: contextText.substring(0, matchStart),
-            style: const TextStyle(
-              fontSize: 12,
-              color: Color(0xFF7A7890),
-            ),
+            style: const TextStyle(fontSize: 12, color: Color(0xFF7A7890)),
           ),
           TextSpan(
             text: contextText.substring(matchStart, matchStart + query.length),
@@ -661,10 +695,7 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
           ),
           TextSpan(
             text: contextText.substring(matchStart + query.length),
-            style: const TextStyle(
-              fontSize: 12,
-              color: Color(0xFF7A7890),
-            ),
+            style: const TextStyle(fontSize: 12, color: Color(0xFF7A7890)),
           ),
           if (endContext < text.length) const TextSpan(text: '...'),
         ],
@@ -699,10 +730,7 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
-              padding: const EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: 8,
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               textStyle: const TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
@@ -724,29 +752,26 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
           child: isLoading
               ? const Center(
                   child: CircularProgressIndicator(
-                    valueColor: AlwaysStoppedAnimation<Color>(
-                      Color(0xFFB39DDB),
-                    ),
+                    valueColor:
+                        AlwaysStoppedAnimation<Color>(Color(0xFFB39DDB)),
                   ),
                 )
               : SingleChildScrollView(
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 24,
-                    vertical: 20,
-                  ),
+                      horizontal: 24, vertical: 20),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const SizedBox(height: 16),
+                      // ── Tarjeta info del niño ──
                       Container(
                         width: double.infinity,
                         padding: const EdgeInsets.all(22),
                         decoration: BoxDecoration(
                           color: Colors.white.withOpacity(0.88),
                           borderRadius: BorderRadius.circular(28),
-                          border: Border.all(
-                            color: Colors.white.withOpacity(0.7),
-                          ),
+                          border:
+                              Border.all(color: Colors.white.withOpacity(0.7)),
                           boxShadow: const [
                             BoxShadow(
                               color: Color(0x1F8C93B5),
@@ -776,22 +801,16 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
                                       : null,
                                 ),
                                 child: fotoUrl.isEmpty
-                                    ? const Icon(
-                                        Icons.person_outline,
-                                        color: Color(0xFFB39DDB),
-                                        size: 50,
-                                      )
+                                    ? const Icon(Icons.person_outline,
+                                        color: Color(0xFFB39DDB), size: 50)
                                     : null,
                               ),
                             ),
                             const SizedBox(height: 20),
                             Row(
                               children: const [
-                                Icon(
-                                  Icons.person_outline,
-                                  color: Color(0xFFB39DDB),
-                                  size: 28,
-                                ),
+                                Icon(Icons.person_outline,
+                                    color: Color(0xFFB39DDB), size: 28),
                                 SizedBox(width: 12),
                                 Text(
                                   'Información del niño',
@@ -827,15 +846,15 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
                         ),
                       ),
                       const SizedBox(height: 24),
+                      // ── Tarjeta documentos ──
                       Container(
                         width: double.infinity,
                         padding: const EdgeInsets.all(22),
                         decoration: BoxDecoration(
                           color: Colors.white.withOpacity(0.88),
                           borderRadius: BorderRadius.circular(28),
-                          border: Border.all(
-                            color: Colors.white.withOpacity(0.7),
-                          ),
+                          border:
+                              Border.all(color: Colors.white.withOpacity(0.7)),
                           boxShadow: const [
                             BoxShadow(
                               color: Color(0x1F8C93B5),
@@ -849,11 +868,8 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
                           children: [
                             Row(
                               children: const [
-                                Icon(
-                                  Icons.description_outlined,
-                                  color: Color(0xFFB39DDB),
-                                  size: 28,
-                                ),
+                                Icon(Icons.description_outlined,
+                                    color: Color(0xFFB39DDB), size: 28),
                                 SizedBox(width: 12),
                                 Text(
                                   'Documentos registrados',
@@ -866,117 +882,93 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
                               ],
                             ),
                             const SizedBox(height: 20),
-                            // Campo de búsqueda en documentos
+                            // Búsqueda
                             Container(
                               decoration: BoxDecoration(
                                 color: const Color(0xFFF8F5FF),
                                 borderRadius: BorderRadius.circular(12),
                                 border: Border.all(
-                                  color: const Color(0xFFE5DDFB),
-                                ),
+                                    color: const Color(0xFFE5DDFB)),
                               ),
                               child: TextField(
                                 controller: _searchController,
                                 decoration: InputDecoration(
                                   hintText: 'Buscar en documentos...',
                                   hintStyle: const TextStyle(
-                                    color: Color(0xFF7A7890),
-                                    fontSize: 14,
-                                  ),
-                                  prefixIcon: const Icon(
-                                    Icons.search,
-                                    color: Color(0xFFB39DDB),
-                                    size: 20,
-                                  ),
-                                  suffixIcon: _searchController.text.isNotEmpty
-                                      ? IconButton(
-                                          icon: const Icon(
-                                            Icons.clear,
-                                            color: Color(0xFFB39DDB),
-                                            size: 20,
-                                          ),
-                                          onPressed: () {
-                                            _searchController.clear();
-                                            _filtrarDocumentos('');
-                                          },
-                                        )
-                                      : null,
+                                      color: Color(0xFF7A7890), fontSize: 14),
+                                  prefixIcon: const Icon(Icons.search,
+                                      color: Color(0xFFB39DDB), size: 20),
+                                  suffixIcon:
+                                      _searchController.text.isNotEmpty
+                                          ? IconButton(
+                                              icon: const Icon(Icons.clear,
+                                                  color: Color(0xFFB39DDB),
+                                                  size: 20),
+                                              onPressed: () {
+                                                _searchController.clear();
+                                                _filtrarDocumentos('');
+                                              },
+                                            )
+                                          : null,
                                   border: InputBorder.none,
-                                  contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 16,
-                                    vertical: 12,
-                                  ),
+                                  contentPadding:
+                                      const EdgeInsets.symmetric(
+                                          horizontal: 16, vertical: 12),
                                 ),
                                 style: const TextStyle(
-                                  fontSize: 14,
-                                  color: Color(0xFF4E4A67),
-                                ),
+                                    fontSize: 14, color: Color(0xFF4E4A67)),
                                 onChanged: _filtrarDocumentos,
                               ),
                             ),
                             const SizedBox(height: 16),
-                            // Selector de categoría de documentos
+                            // Filtro categoría
                             Container(
                               decoration: BoxDecoration(
                                 color: const Color(0xFFF8F5FF),
                                 borderRadius: BorderRadius.circular(12),
                                 border: Border.all(
-                                  color: const Color(0xFFE5DDFB),
-                                ),
+                                    color: const Color(0xFFE5DDFB)),
                               ),
                               child: DropdownButtonFormField<String>(
                                 value: categoriaDocumentoSeleccionada,
                                 decoration: const InputDecoration(
-                                  hintText: 'Seleccionar categoría',
-                                  hintStyle: TextStyle(
-                                    color: Color(0xFF7A7890),
-                                    fontSize: 14,
-                                  ),
-                                  prefixIcon: Icon(
-                                    Icons.folder_outlined,
-                                    color: Color(0xFFB39DDB),
-                                    size: 20,
-                                  ),
+                                  prefixIcon: Icon(Icons.folder_outlined,
+                                      color: Color(0xFFB39DDB), size: 20),
                                   border: InputBorder.none,
                                   contentPadding: EdgeInsets.symmetric(
-                                    horizontal: 16,
-                                    vertical: 12,
-                                  ),
+                                      horizontal: 16, vertical: 12),
                                 ),
                                 style: const TextStyle(
-                                  fontSize: 14,
-                                  color: Color(0xFF4E4A67),
-                                ),
+                                    fontSize: 14, color: Color(0xFF4E4A67)),
                                 dropdownColor: const Color(0xFFF8F5FF),
-                                items: categoriasDocumentos.map((categoria) {
-                                  return DropdownMenuItem<String>(
-                                    value: categoria,
-                                    child: Text(
-                                      _formatearNombreCategoria(categoria),
-                                      style: const TextStyle(
-                                        fontSize: 14,
-                                        color: Color(0xFF4E4A67),
-                                      ),
-                                    ),
-                                  );
-                                }).toList(),
+                                items: categoriasDocumentos
+                                    .map((c) => DropdownMenuItem<String>(
+                                          value: c,
+                                          child: Text(
+                                            _formatearNombreCategoria(c),
+                                            style: const TextStyle(
+                                                fontSize: 14,
+                                                color: Color(0xFF4E4A67)),
+                                          ),
+                                        ))
+                                    .toList(),
                                 onChanged: _cambiarCategoriaDocumento,
                               ),
                             ),
                             const SizedBox(height: 20),
-                            // Indicador de resultados
                             if (documentos.isNotEmpty)
                               Padding(
                                 padding: const EdgeInsets.only(bottom: 16),
                                 child: Text(
-                                  documentosFiltrados.length == documentos.length &&
-                                          (categoriaDocumentoSeleccionada == null || categoriaDocumentoSeleccionada == categoriasDocumentos[0]) &&
+                                  documentosFiltrados.length ==
+                                              documentos.length &&
+                                          (categoriaDocumentoSeleccionada ==
+                                                  null ||
+                                              categoriaDocumentoSeleccionada ==
+                                                  categoriasDocumentos[0]) &&
                                           _searchController.text.isEmpty
                                       ? 'Mostrando ${documentos.length} documento(s)'
-                                      : documentosFiltrados.length == documentos.length &&
-                                              (categoriaDocumentoSeleccionada != null && categoriaDocumentoSeleccionada != categoriasDocumentos[0])
-                                          ? 'Mostrando ${documentosFiltrados.length} documento(s) en ${_formatearNombreCategoria(categoriaDocumentoSeleccionada!)}'
-                                          : 'Mostrando ${documentosFiltrados.length} de ${documentos.length} documento(s)',
+                                      : 'Mostrando ${documentosFiltrados.length} de ${documentos.length} documento(s)',
                                   style: const TextStyle(
                                     fontSize: 14,
                                     color: Color(0xFF7A7890),
@@ -992,16 +984,14 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
                                   color: const Color(0xFFF8F5FF),
                                   borderRadius: BorderRadius.circular(16),
                                   border: Border.all(
-                                    color: const Color(0xFFE5DDFB),
-                                  ),
+                                      color: const Color(0xFFE5DDFB)),
                                 ),
                                 child: const Center(
                                   child: Text(
                                     'No hay documentos registrados para este niño.',
                                     style: TextStyle(
-                                      fontSize: 16,
-                                      color: Color(0xFF7A7890),
-                                    ),
+                                        fontSize: 16,
+                                        color: Color(0xFF7A7890)),
                                     textAlign: TextAlign.center,
                                   ),
                                 ),
@@ -1014,45 +1004,46 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
                                   color: const Color(0xFFFFF8E1),
                                   borderRadius: BorderRadius.circular(16),
                                   border: Border.all(
-                                    color: const Color(0xFFFFD54F),
-                                  ),
+                                      color: const Color(0xFFFFD54F)),
                                 ),
-                                child: Center(
+                                child: const Center(
                                   child: Text(
-                                    _searchController.text.isNotEmpty && (categoriaDocumentoSeleccionada == null || categoriaDocumentoSeleccionada == categoriasDocumentos[0])
-                                        ? 'No se encontraron documentos que coincidan con "${_searchController.text}".'
-                                        : categoriaDocumentoSeleccionada != null && categoriaDocumentoSeleccionada != categoriasDocumentos[0] && _searchController.text.isNotEmpty
-                                            ? 'No se encontraron documentos en ${_formatearNombreCategoria(categoriaDocumentoSeleccionada!)} que coincidan con "${_searchController.text}".'
-                                            : categoriaDocumentoSeleccionada != null && categoriaDocumentoSeleccionada != categoriasDocumentos[0]
-                                                ? 'No se encontraron documentos en la categoría ${_formatearNombreCategoria(categoriaDocumentoSeleccionada!)}.'
-                                                : 'No se encontraron documentos que coincidan con la búsqueda.',
-                                    style: const TextStyle(
-                                      fontSize: 16,
-                                      color: Color(0xFF7A7890),
-                                    ),
+                                    'No se encontraron documentos.',
+                                    style: TextStyle(
+                                        fontSize: 16,
+                                        color: Color(0xFF7A7890)),
                                     textAlign: TextAlign.center,
                                   ),
                                 ),
                               )
                             else
                               ...documentosFiltrados.map((documento) {
-                                final tipo = documento['tipo'] as String? ?? '';
-                                final url = documento['url'] as String?;
+                                final tipo =
+                                    documento['tipo'] as String? ?? '';
+                                final url =
+                                    documento['url'] as String?;
                                 final nombreArchivo =
-                                    documento['nombre_archivo'] as String? ??
-                                    'Documento';
-                                final contenidoTexto = documento['contenido_texto'] as String? ?? '';
-                                final categoria = documento['categoria'] as String? ?? 'Sin categoría';
+                                    documento['nombre_archivo']
+                                            as String? ??
+                                        'Documento';
+                                final contenidoTexto =
+                                    documento['contenido_texto']
+                                            as String? ??
+                                        '';
+                                final cat =
+                                    documento['categoria'] as String? ??
+                                        'Sin categoría';
 
                                 return Container(
-                                  margin: const EdgeInsets.only(bottom: 16),
+                                  margin:
+                                      const EdgeInsets.only(bottom: 16),
                                   padding: const EdgeInsets.all(16),
                                   decoration: BoxDecoration(
                                     color: Colors.white,
-                                    borderRadius: BorderRadius.circular(16),
+                                    borderRadius:
+                                        BorderRadius.circular(16),
                                     border: Border.all(
-                                      color: const Color(0xFFE9E6F8),
-                                    ),
+                                        color: const Color(0xFFE9E6F8)),
                                     boxShadow: const [
                                       BoxShadow(
                                         color: Color(0x0F8C93B5),
@@ -1072,23 +1063,27 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
                                             height: 40,
                                             decoration: BoxDecoration(
                                               borderRadius:
-                                                  BorderRadius.circular(12),
-                                              gradient: const LinearGradient(
+                                                  BorderRadius.circular(
+                                                      12),
+                                              gradient:
+                                                  const LinearGradient(
                                                 colors: [
                                                   Color(0xFFB39DDB),
                                                   Color(0xFF81D4D4),
                                                 ],
                                                 begin: Alignment.topLeft,
-                                                end: Alignment.bottomRight,
+                                                end:
+                                                    Alignment.bottomRight,
                                               ),
                                             ),
                                             child: Icon(
                                               tipo == 'imagen'
                                                   ? Icons.image_outlined
                                                   : tipo == 'archivo'
-                                                  ? Icons
-                                                        .insert_drive_file_outlined
-                                                  : Icons.text_fields_outlined,
+                                                      ? Icons
+                                                          .insert_drive_file_outlined
+                                                      : Icons
+                                                          .text_fields_outlined,
                                               color: Colors.white,
                                               size: 20,
                                             ),
@@ -1103,22 +1098,30 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
                                                   nombreArchivo,
                                                   style: const TextStyle(
                                                     fontSize: 16,
-                                                    fontWeight: FontWeight.w600,
-                                                    color: Color(0xFF3F3D56),
+                                                    fontWeight:
+                                                        FontWeight.w600,
+                                                    color:
+                                                        Color(0xFF3F3D56),
                                                   ),
                                                 ),
                                                 const SizedBox(height: 4),
                                                 Text(
-                                                  'Tipo: ${tipo.isEmpty ? 'Desconocido' : tipo} • Categoría: ${categoria}',
+                                                  'Tipo: $tipo • Categoría: $cat',
                                                   style: const TextStyle(
                                                     fontSize: 14,
-                                                    color: Color(0xFF7A7890),
+                                                    color:
+                                                        Color(0xFF7A7890),
                                                   ),
                                                 ),
-                                                // Mostrar preview del contenido si hay búsqueda activa
-                                                if (_searchController.text.isNotEmpty && contenidoTexto.isNotEmpty) ...[
+                                                if (_searchController
+                                                        .text.isNotEmpty &&
+                                                    contenidoTexto
+                                                        .isNotEmpty) ...[
                                                   const SizedBox(height: 8),
-                                                  _buildHighlightedText(contenidoTexto, _searchController.text),
+                                                  _buildHighlightedText(
+                                                      contenidoTexto,
+                                                      _searchController
+                                                          .text),
                                                 ],
                                               ],
                                             ),
@@ -1127,69 +1130,37 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
                                       ),
                                       const SizedBox(height: 12),
                                       Row(
-                                        mainAxisAlignment: MainAxisAlignment.end,
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.end,
                                         children: [
                                           TextButton.icon(
-                                            onPressed: () => _eliminarDocumento(
+                                            onPressed: () =>
+                                                _eliminarDocumento(
                                               documento['id'].toString(),
                                               url,
                                             ),
                                             icon: const Icon(
-                                              Icons.delete_outline,
-                                              color: Color(0xFFEF5350),
-                                            ),
-                                            label: const Text(
-                                              'Eliminar',
-                                              style: TextStyle(
-                                                color: Color(0xFFEF5350),
-                                              ),
-                                            ),
+                                                Icons.delete_outline,
+                                                color: Color(0xFFEF5350)),
+                                            label: const Text('Eliminar',
+                                                style: TextStyle(
+                                                    color: Color(
+                                                        0xFFEF5350))),
                                           ),
                                         ],
                                       ),
-                                      if (tipo == 'imagen' && url != null) ...[
-                                        const SizedBox(height: 12),
-                                        ClipRRect(
-                                          borderRadius: BorderRadius.circular(
-                                            12,
-                                          ),
-                                          child: Image.network(
-                                            url,
-                                            height: 120,
-                                            width: double.infinity,
-                                            fit: BoxFit.cover,
-                                            errorBuilder: (_, __, ___) => Container(
-                                              height: 120,
-                                              decoration: BoxDecoration(
-                                                color: const Color(0xFFF8F5FF),
-                                                borderRadius:
-                                                    BorderRadius.circular(12),
-                                                border: Border.all(
-                                                  color: const Color(
-                                                    0xFFE5DDFB,
-                                                  ),
-                                                ),
-                                              ),
-                                              child: const Center(
-                                                child: Text(
-                                                  'No se pudo mostrar la imagen',
-                                                  style: TextStyle(
-                                                    color: Color(0xFF7A7890),
-                                                  ),
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                      ] else if (url != null && url.isNotEmpty) ...[
+                                      // ✅ Imágenes: usar DocumentViewer como otros documentos
+                                      if (url != null &&
+                                          url.isNotEmpty) ...[
                                         const SizedBox(height: 12),
                                         DocumentViewer(
                                           url: url,
                                           tipo: tipo,
-                                          nino: nombre, // Usar la variable nombre cargada
-                                          categoria: categoria,
+                                          nino: nombre,
+                                          categoria: cat,
                                           fileName: nombreArchivo,
-                                          bucket: 'documentos', // Usar la categoria como bucket
+                                          bucket: 'documentos',
+                                          contenidoTexto: contenidoTexto.isNotEmpty ? contenidoTexto : null,
                                         ),
                                       ],
                                     ],
@@ -1220,8 +1191,7 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
                           onPressed: () => Navigator.pushReplacement(
                             context,
                             MaterialPageRoute(
-                              builder: (_) => const ListaNinosPage(),
-                            ),
+                                builder: (_) => const ListaNinosPage()),
                           ),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.transparent,
@@ -1291,7 +1261,8 @@ class _InfoRow extends StatelessWidget {
               const SizedBox(height: 4),
               Text(
                 value,
-                style: const TextStyle(fontSize: 16, color: Color(0xFF4E4A67)),
+                style:
+                    const TextStyle(fontSize: 16, color: Color(0xFF4E4A67)),
               ),
             ],
           ),
