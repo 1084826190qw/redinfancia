@@ -76,8 +76,6 @@ class _NinosPageState extends State<NinosPage> {
 
   String? generoSeleccionado;
   DateTime? fechaNacimiento;
-  // ✅ Categoría de foto/escaneos (se mantiene global para esos)
-  String? categoriaSeleccionada;
 
   final List<String> generos = ['Masculino', 'Femenino'];
 
@@ -282,11 +280,6 @@ class _NinosPageState extends State<NinosPage> {
           const SnackBar(content: Text('Selecciona fecha de nacimiento')));
       return;
     }
-    if (categoriaSeleccionada == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Selecciona carpeta principal')));
-      return;
-    }
     if (documentosEscaneados.isEmpty && _archivosBytes.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('Escanea o sube al menos un documento')));
@@ -304,6 +297,8 @@ class _NinosPageState extends State<NinosPage> {
         'id_usuario': supabase.auth.currentUser!.id,
       });
 
+      final categoriaBase = categorias[0];
+
       // Foto
       if (imagen != null) {
         try {
@@ -311,7 +306,7 @@ class _NinosPageState extends State<NinosPage> {
               ? imagen as Uint8List
               : await imagen.readAsBytes();
           final path =
-              '$categoriaSeleccionada/$idNino/${_sanitizarNombreArchivo('foto_perfil.jpg')}';
+              '$categoriaBase/$idNino/${_sanitizarNombreArchivo('foto_perfil.jpg')}';
           await supabase.storage.from('documentos').uploadBinary(path, bytes);
           final fotoUrl =
               supabase.storage.from('documentos').getPublicUrl(path);
@@ -333,7 +328,7 @@ class _NinosPageState extends State<NinosPage> {
         try {
           final bytes = Uint8List.fromList(textoEscaneados.codeUnits);
           final path =
-              '$categoriaSeleccionada/$idNino/${_sanitizarNombreArchivo('documento_oculto.txt')}';
+              '$categoriaBase/$idNino/${_sanitizarNombreArchivo('documento_oculto.txt')}';
           await supabase.storage.from('documentos').uploadBinary(path, bytes);
           final urlTexto =
               supabase.storage.from('documentos').getPublicUrl(path);
@@ -342,7 +337,7 @@ class _NinosPageState extends State<NinosPage> {
             'nombre_archivo': 'documento_oculto.txt',
             'url': urlTexto,
             'tipo': 'texto',
-            'categoria': categoriaSeleccionada,
+            'categoria': categoriaBase,
             'contenido_texto': textoEscaneados,
           });
           print('✓ OCR escaneados guardado');
@@ -428,7 +423,6 @@ class _NinosPageState extends State<NinosPage> {
         _archivosBytes.clear();
         _nombresArchivos.clear();
         _categoriasArchivos.clear();
-        categoriaSeleccionada = null;
         imagen = null;
       });
 
@@ -830,29 +824,6 @@ class _NinosPageState extends State<NinosPage> {
     );
   }),
 ],
-                      const SizedBox(height: 16),
-
-                      // Categoría global para foto de perfil
-                      DropdownButtonFormField<String>(
-                        value: categoriaSeleccionada,
-                        hint: const Text(
-                          'Carpeta para foto de perfil',
-                        ),
-                        decoration: _inputDecoration(
-                          label: 'Carpeta principal',
-                          icon: Icons.folder_outlined,
-                        ),
-                        items: categorias
-                            .map(
-                              (cat) => DropdownMenuItem(
-                                value: cat,
-                                child: Text(_formatearCategoria(cat)),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: (value) =>
-                            setState(() => categoriaSeleccionada = value),
-                      ),
                     ],
                   ),
                 ),
