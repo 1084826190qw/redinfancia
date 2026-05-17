@@ -142,6 +142,8 @@ class _BusquedaAvanzadaPageState extends State<BusquedaAvanzadaPage> {
       final Set<String> todasPalabrasClave = {};
 
       for (final item in response) {
+        if (!_esNinoDelUsuario(item)) continue;
+
         final nino = item['nino'] as Map<String, dynamic>;
         final documentos = item['documentos'] as List<dynamic>;
         final ninoId = nino['id'];
@@ -274,6 +276,8 @@ class _BusquedaAvanzadaPageState extends State<BusquedaAvanzadaPage> {
       final Map<String, Map<String, dynamic>> ninosUnicos = {};
 
       for (final item in response) {
+        if (!_esNinoDelUsuario(item)) continue;
+
         final nino = item['nino'] ?? item; // Dependiendo de si usas RPC o consulta directa
         final documentos = item['documentos'] ?? [item['documento']].where((d) => d != null);
 
@@ -343,8 +347,31 @@ class _BusquedaAvanzadaPageState extends State<BusquedaAvanzadaPage> {
            categoria.toLowerCase().contains(queryLower);
   }
 
+  bool _esNinoDelUsuario(Map<String, dynamic> item) {
+    final currentUserId = supabase.auth.currentUser?.id;
+    if (currentUserId == null) return false;
+
+    final nino = item['nino'] ?? item;
+    if (nino is Map<String, dynamic>) {
+      final ownerId = nino['id_usuario'] ?? nino['user_id'] ?? nino['auth_id'];
+      return ownerId == currentUserId;
+    }
+
+    return false;
+  }
+
   Future<void> _buscarEnDocumentosBasico(String query) async {
     // Búsqueda básica como fallback
+    final currentUser = supabase.auth.currentUser;
+    if (currentUser == null) {
+      setState(() {
+        resultados = [];
+        isLoading = false;
+        errorMessage = 'No hay usuario autenticado.';
+      });
+      return;
+    }
+
     final response = await supabase
         .from('ninos')
         .select('''
@@ -357,6 +384,7 @@ class _BusquedaAvanzadaPageState extends State<BusquedaAvanzadaPage> {
             categoria
           )
         ''')
+        .eq('id_usuario', currentUser.id)
         .filter('documentos.contenido_texto', 'ilike', '%${query.trim()}%');
 
     // Procesar resultados para evitar duplicados

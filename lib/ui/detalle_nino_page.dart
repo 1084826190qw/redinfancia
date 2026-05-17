@@ -108,10 +108,22 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
   Future<void> _cargarDatos() async {
   setState(() => isLoading = true);
   try {
+    final currentUser = supabase.auth.currentUser;
+    if (currentUser == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Debes iniciar sesión para ver este niño')),
+        );
+        Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const ListaNinosPage()));
+      }
+      return;
+    }
+
     final ninoData = await supabase
         .from('ninos')
         .select()
         .eq('id', widget.id)
+        .eq('id_usuario', currentUser.id)
         .single();
 
     final docData = await supabase
@@ -182,7 +194,7 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
 }
 
   Future<void> _seleccionarArchivoNuevo(StateSetter setDialogState) async {
-    final result = await FilePicker.platform.pickFiles(
+    final result = await FilePicker.pickFiles(
       withData: true,
       allowMultiple: true,
     );
@@ -1603,62 +1615,69 @@ class _TextoOcrViewerState extends State<_TextoOcrViewer> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Header
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 12, 8, 8),
-            child: Row(
-              children: [
-                const Icon(Icons.document_scanner_outlined,
-                    color: Color(0xFF7C4DFF), size: 16),
-                const SizedBox(width: 8),
-                const Text(
-                  'OCR extraído',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF4E4A67),
-                  ),
-                ),
-                const Spacer(),
-                if (tieneCoincidencia)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF0EBFF),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Text(
-                      '$totalCoincidencias',
-                      style: const TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                        color: Color(0xFF7C4DFF),
-                      ),
-                    ),
-                  ),
-                IconButton(
-                  icon: Icon(
-                    _expandido
-                        ? Icons.keyboard_arrow_up
-                        : Icons.keyboard_arrow_down,
-                    color: const Color(0xFF7C4DFF),
-                    size: 18,
-                  ),
-                  onPressed: () {
-                    setState(() => _expandido = !_expandido);
-                    if (_expandido && widget.query.isNotEmpty) {
-                      WidgetsBinding.instance.addPostFrameCallback(
-                          (_) => _scrollToMatch());
-                    }
-                  },
-                  tooltip: _expandido ? 'Colapsar' : 'Expandir',
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(
-                      minWidth: 32, minHeight: 32),
-                ),
-              ],
+          // Header
+Padding(
+  padding: const EdgeInsets.fromLTRB(14, 12, 8, 8),
+  child: Row(
+    children: [
+      const Icon(Icons.document_scanner_outlined,
+          color: Color(0xFFB39DDB), size: 18),
+      const SizedBox(width: 8),
+      // ✅ Expanded para que el título no desborde
+      Expanded(
+        child: Text(
+          'Texto extraído de la imagen',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF6E63B6),
+          ),
+          overflow: TextOverflow.ellipsis,
+        ),
+      ),
+      const SizedBox(width: 4),
+      // Badge con número de coincidencias
+      if (tieneCoincidencia)
+        Container(
+          padding: const EdgeInsets.symmetric(
+              horizontal: 6, vertical: 2),
+          decoration: BoxDecoration(
+            color: const Color(0xFFB39DDB),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Text(
+            '$totalCoincidencias',
+            style: const TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+              color: Colors.white,
             ),
           ),
+        ),
+      // Botón expandir/colapsar
+      IconButton(
+        icon: Icon(
+          _expandido
+              ? Icons.keyboard_arrow_up
+              : Icons.keyboard_arrow_down,
+          color: const Color(0xFFB39DDB),
+          size: 20,
+        ),
+        onPressed: () {
+          setState(() => _expandido = !_expandido);
+          if (_expandido && widget.query.isNotEmpty) {
+            WidgetsBinding.instance
+                .addPostFrameCallback((_) => _scrollToMatch());
+          }
+        },
+        tooltip: _expandido ? 'Colapsar' : 'Expandir',
+        padding: EdgeInsets.zero,
+        constraints: const BoxConstraints(
+            minWidth: 32, minHeight: 32),
+      ),
+    ],
+  ),
+),
 
           // Si hay coincidencia y está colapsado, mostrar preview
           if (!_expandido && tieneCoincidencia) ...[

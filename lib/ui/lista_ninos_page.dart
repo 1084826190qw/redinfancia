@@ -26,7 +26,19 @@ class _ListaNinosPageState extends State<ListaNinosPage> {
   }
 
   Future<void> cargarNinos() async {
-    final data = await supabase.from('ninos').select();
+    final currentUser = supabase.auth.currentUser;
+    if (currentUser == null) {
+      setState(() {
+        listaNinos = [];
+        filteredNinos = [];
+      });
+      return;
+    }
+
+    final data = await supabase
+        .from('ninos')
+        .select()
+        .eq('id_usuario', currentUser.id);
 
     setState(() {
       listaNinos = List<Map<String, dynamic>>.from(data);
@@ -70,7 +82,14 @@ class _ListaNinosPageState extends State<ListaNinosPage> {
     );
 
     if (confirmar == true) {
-      await supabase.from('ninos').delete().eq('id', id);
+      final currentUser = supabase.auth.currentUser;
+      if (currentUser != null) {
+        await supabase
+            .from('ninos')
+            .delete()
+            .eq('id', id)
+            .eq('id_usuario', currentUser.id);
+      }
       await cargarNinos();
     }
   }

@@ -49,6 +49,7 @@ BEGIN
     FROM ninos n
     INNER JOIN documentos d ON n.id = d.id_nino
     WHERE d.contenido_texto ILIKE '%' || trim(query_text) || '%'
+      AND n.id_usuario = auth.uid()
     GROUP BY n.id, n.nombre, n.genero, n.fecha_nacimiento, n.categoria, n.foto_url
     ORDER BY total_coincidencias DESC, n.nombre
     LIMIT limit_results
@@ -100,6 +101,7 @@ BEGIN
       ncd.num_documentos as total_coincidencias
     FROM ninos_con_documentos ncd
     INNER JOIN ninos n ON ncd.id_nino = n.id
+    WHERE n.id_usuario = auth.uid()
     ORDER BY ncd.max_rank DESC, ncd.num_documentos DESC, n.nombre;
   END IF;
 END;
@@ -176,7 +178,8 @@ BEGIN
       count(d.id)::bigint as total_coincidencias
     FROM ninos n
     INNER JOIN documentos d ON n.id = d.id_nino
-    WHERE d.contenido_texto ILIKE ''%'' || $1 || ''%''' || where_clause || '
+    WHERE d.contenido_texto ILIKE ''%'' || $1 || ''%''
+      AND n.id_usuario = auth.uid()' || where_clause || '
     GROUP BY n.id, n.nombre, n.genero, n.fecha_nacimiento, n.categoria, n.foto_url
     ORDER BY total_coincidencias DESC, n.nombre
     LIMIT $2
@@ -230,6 +233,7 @@ BEGIN
       ncd.num_documentos as total_coincidencias
     FROM ninos_con_documentos ncd
     INNER JOIN ninos n ON ncd.id_nino = n.id
+    WHERE n.id_usuario = auth.uid()
     ORDER BY ncd.max_rank DESC, ncd.num_documentos DESC, n.nombre'
     USING trim(query_text), limit_results, offset_results,
           tipos_documento, categorias_documento, fecha_desde, fecha_hasta, query_tsquery;

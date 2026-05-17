@@ -147,7 +147,7 @@ class _NinosPageState extends State<NinosPage> {
     if (kIsWeb ||
         !(defaultTargetPlatform == TargetPlatform.android ||
             defaultTargetPlatform == TargetPlatform.iOS)) {
-      final result = await FilePicker.platform.pickFiles(
+      final result = await FilePicker.pickFiles(
         type: FileType.image,
         withData: kIsWeb,
         allowMultiple: false,
@@ -202,7 +202,7 @@ class _NinosPageState extends State<NinosPage> {
 
   // ✅ Al seleccionar archivos, cada uno empieza con categoría por defecto
   Future<void> seleccionarArchivo() async {
-    final result = await FilePicker.platform.pickFiles(
+    final result = await FilePicker.pickFiles(
       withData: true,
       allowMultiple: true,
     );
@@ -446,6 +446,7 @@ class _NinosPageState extends State<NinosPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      resizeToAvoidBottomInset: true,
       extendBodyBehindAppBar: true,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
@@ -647,38 +648,46 @@ class _NinosPageState extends State<NinosPage> {
                                       ),
                                     ),
                                     IconButton(
-                                      icon: const Icon(Icons.delete_outline,
-                                          size: 18,
-                                          color: Color(0xFFEF5350)),
-                                      onPressed: () => setState(() {
-                                        _archivos.removeAt(index);
-                                        _archivosBytes.removeAt(index);
-                                        _nombresArchivos.removeAt(index);
-                                        _categoriasArchivos.removeAt(index);
-                                      }),
-                                      tooltip: 'Remover archivo',
-                                    ),
+  padding: EdgeInsets.zero,
+  constraints: const BoxConstraints(),
+  icon: const Icon(
+    Icons.delete_outline,
+    size: 18,
+    color: Color(0xFFEF5350),
+  ),
+  onPressed: () => setState(() {
+    _archivos.removeAt(index);
+    _archivosBytes.removeAt(index);
+    _nombresArchivos.removeAt(index);
+    _categoriasArchivos.removeAt(index);
+  }),
+  tooltip: 'Remover archivo',
+),
                                   ],
                                 ),
                                 const SizedBox(height: 8),
                                 // ✅ Selector de categoría individual
-                                DropdownButtonFormField<String>(
-                                  value: _categoriasArchivos[index],
-                                  isDense: true,
-                                  decoration: InputDecoration(
-                                    labelText: 'Carpeta',
-                                    labelStyle: const TextStyle(
-                                        fontSize: 12,
-                                        color: Color(0xFF8F88D9)),
-                                    prefixIcon: const Icon(
-                                        Icons.folder_outlined,
-                                        color: Color(0xFF8F88D9),
-                                        size: 18),
-                                    filled: true,
-                                    fillColor: Colors.white,
-                                    contentPadding:
-                                        const EdgeInsets.symmetric(
-                                            horizontal: 12, vertical: 8),
+                              DropdownButtonFormField<String>(
+  value: _categoriasArchivos[index],
+  isExpanded: true,
+  isDense: true,
+  decoration: InputDecoration(
+    labelText: 'Carpeta',
+    labelStyle: const TextStyle(
+      fontSize: 12,
+      color: Color(0xFF8F88D9),
+    ),
+    prefixIcon: const Icon(
+      Icons.folder_outlined,
+      color: Color(0xFF8F88D9),
+      size: 18,
+    ),
+    filled: true,
+    fillColor: Colors.white,
+    contentPadding: const EdgeInsets.symmetric(
+      horizontal: 10,
+      vertical: 10,
+    ),
                                     border: OutlineInputBorder(
                                       borderRadius: BorderRadius.circular(10),
                                       borderSide: BorderSide.none,
@@ -701,9 +710,11 @@ class _NinosPageState extends State<NinosPage> {
                                       .map((cat) => DropdownMenuItem(
                                             value: cat,
                                             child: Text(
-                                                _formatearCategoria(cat),
-                                                style: const TextStyle(
-                                                    fontSize: 13)),
+  _formatearCategoria(cat),
+  overflow: TextOverflow.ellipsis,
+  maxLines: 1,
+  style: const TextStyle(fontSize: 12),
+),
                                           ))
                                       .toList(),
                                   onChanged: (value) {
@@ -790,8 +801,14 @@ class _NinosPageState extends State<NinosPage> {
             items: categorias.map((cat) {
               return DropdownMenuItem(
                 value: cat,
-                child: Text(_formatearCategoria(cat)),
-              );
+child: SizedBox(
+  width: 180,
+  child: Text(
+    _formatearCategoria(cat),
+    overflow: TextOverflow.ellipsis,
+    maxLines: 1,
+  ),
+),              );
             }).toList(),
             onChanged: (value) {
               if (value != null) {

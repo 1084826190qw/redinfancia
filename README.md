@@ -33,18 +33,14 @@ flutter pub get
 
 ### 3. Configurar Supabase
 
-Ir al archivo:
+Crear un archivo `.env` en la raíz del proyecto con tus credenciales de Supabase:
 
-```
-lib/main.dart
+```env
+SUPABASE_URL=https://tu-proyecto.supabase.co
+SUPABASE_ANON_KEY=tu-anon-key
 ```
 
-y colocar:
-
-```dart
-const supabaseUrl = 'TU_URL';
-const supabaseKey = 'TU_KEY';
-```
+> **Nota:** El archivo `.env` ya está incluido en `.gitignore`, así que las llaves no se subirán al repositorio.
 
 ---
 

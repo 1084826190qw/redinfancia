@@ -18,14 +18,14 @@ class _RegisterPageState extends State<RegisterPage> {
   bool isLoading = false;
 
   Future<void> register() async {
-    if (isLoading) return; 
+    if (isLoading) return;
     if (emailController.text.isEmpty ||
         passwordController.text.isEmpty ||
         confirmPasswordController.text.isEmpty) {
       _showError('Por favor completa todos los campos');
       return;
     }
-    
+
     if (passwordController.text != confirmPasswordController.text) {
       _showError('Las contraseñas no coinciden');
       return;
@@ -35,14 +35,16 @@ class _RegisterPageState extends State<RegisterPage> {
       _showError('La contraseña debe tener al menos 6 caracteres');
       return;
     }
+
     if (hogarController.text.isEmpty) {
-     _showError('Ingresa el hogar comunitario');
-    return;
+      _showError('Ingresa el hogar comunitario');
+      return;
     }
-     if (usernameController.text.isEmpty) {
+
+    if (usernameController.text.isEmpty) {
       _showError('Ingresa un nombre de usuario');
       return;
-   }
+    }
 
     setState(() => isLoading = true);
 
@@ -55,26 +57,33 @@ class _RegisterPageState extends State<RegisterPage> {
         password: passwordController.text,
       );
 
-      if (response.user != null) {
-        // Insertar datos en tabla usuarios con columnas correctas
-        await supabase.from('usuarios').insert({
-          'id': response.user!.id,
-          'nombre': usernameController.text.trim(),
-          'correo': emailController.text.trim(),
-          'nombre_hogar': hogarController.text.trim(),
-          'created_at': DateTime.now().toIso8601String(),
-        });
-
-        _showSuccess('Registro exitoso. Inicia sesión');
-        Future.delayed(const Duration(seconds: 2), () {
-          if (mounted) {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (context) => const LoginPage()),
-            );
-          }
-        });
+      final user = response.user ?? response.session?.user;
+      final userId = user?.id;
+      if (userId == null) {
+        _showSuccess('Registro enviado. Revisa tu correo para confirmar tu cuenta.');
+        return;
       }
+
+      await _insertUsuarioRow(
+        supabase,
+        userId,
+        usernameController.text.trim(),
+        emailController.text.trim(),
+        hogarController.text.trim(),
+      );
+
+      // Cerrar sesión para deshacer el auto-login de signUp()
+      await supabase.auth.signOut();
+
+      _showSuccess('Registro exitoso. Inicia sesión');
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (context) => const LoginPage()),
+          );
+        }
+      });
     } on AuthException catch (e) {
       if (e.message.contains('over_email_send_rate_limit')) {
         _showError('Espera unos minutos antes de intentar de nuevo');
@@ -90,6 +99,22 @@ class _RegisterPageState extends State<RegisterPage> {
         setState(() => isLoading = false);
       }
     }
+  }
+
+  Future<void> _insertUsuarioRow(
+    SupabaseClient supabase,
+    String userId,
+    String username,
+    String email,
+    String hogar,
+  ) async {
+    await supabase.from('usuarios').upsert({
+      'id': userId,
+      'nombre': username,
+      'correo': email,
+      'nombre_hogar': hogar,
+      'created_at': DateTime.now().toIso8601String(),
+    });
   }
 
   void _showError(String message) {
