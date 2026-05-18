@@ -37,6 +37,9 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
 
   // ✅ Nuevo filtro: modo de búsqueda
   bool _buscarSoloEnOcr = false;
+  bool _showOcrOption = false;
+  bool _tappedFilter = false;
+  final FocusNode _searchFocusNode = FocusNode();
 
   final List<dynamic> _archivosNuevos = [];
   final List<Uint8List?> _archivosNuevosBytes = [];
@@ -97,11 +100,18 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
     super.initState();
     categoriaDocumentoSeleccionada = categoriasDocumentos[0];
     _cargarDatos();
+    _searchFocusNode.addListener(() {
+      if (!_searchFocusNode.hasFocus && !_tappedFilter) {
+        setState(() => _showOcrOption = false);
+      }
+      _tappedFilter = false;
+    });
   }
 
   @override
   void dispose() {
     _searchController.dispose();
+    _searchFocusNode.dispose();
     super.dispose();
   }
 
@@ -220,34 +230,99 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
       );
       return;
     }
+
+    Future<void> procesarImagen(ImageSource source) async {
+      try {
+        final pickedFile = await _picker.pickImage(
+          source: source,
+          imageQuality: 80,
+        );
+        if (pickedFile != null) {
+          setDialogState(() {
+            final nombreArchivo =
+                'documento_escaner_${DateTime.now().millisecondsSinceEpoch}.jpg';
+            _nombresArchivosNuevos.add(nombreArchivo);
+            if (!kIsWeb && pickedFile.path != null) {
+              _archivosNuevos.add(createFile(pickedFile.path));
+              _archivosNuevosBytes.add(null);
+            }
+          });
+        }
+      } catch (e) {
+        print('Error al escanear: $e');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error: $e')),
+          );
+        }
+      }
+    }
+
     if (!kIsWeb && Theme.of(context).platform == TargetPlatform.linux) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Escaneo no disponible en Linux.')),
-      );
+      await procesarImagen(ImageSource.gallery);
       return;
     }
-    try {
-      final pickedFile = await _picker.pickImage(
-        source: ImageSource.camera,
-        imageQuality: 80,
-      );
-      if (pickedFile != null) {
-        setDialogState(() {
-          final nombreArchivo =
-              'documento_escaner_${DateTime.now().millisecondsSinceEpoch}.jpg';
-          _nombresArchivosNuevos.add(nombreArchivo);
-          if (!kIsWeb && pickedFile.path != null) {
-            _archivosNuevos.add(createFile(pickedFile.path));
-            _archivosNuevosBytes.add(null);
-          }
-        });
-      }
-    } catch (e) {
-      print('Error al escanear: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Error al acceder a la cámara.')),
-      );
-    }
+
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE5DDFB),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 20),
+              const Text(
+                'Agregar imagen',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF4E4A67),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: _ImageOption(
+                      icon: Icons.camera_alt_outlined,
+                      label: 'Tomar foto',
+                      onTap: () {
+                        Navigator.pop(context);
+                        procesarImagen(ImageSource.camera);
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: _ImageOption(
+                      icon: Icons.photo_library_outlined,
+                      label: 'Elegir de galería',
+                      onTap: () {
+                        Navigator.pop(context);
+                        procesarImagen(ImageSource.gallery);
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Future<String> _extraerTextoDeArchivos() async {
@@ -994,9 +1069,58 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
                               ),
                             ),
                             const SizedBox(height: 12),
+                            // ── Campo de búsqueda ──
+                            Container(
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF8F5FF),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                    color: const Color(0xFFE5DDFB)),
+                              ),
+                              child: TextField(
+                                focusNode: _searchFocusNode,
+                                controller: _searchController,
+                                decoration: InputDecoration(
+                                  hintText: _buscarSoloEnOcr
+                                      ? 'Buscar palabras en texto escaneado...'
+                                      : 'Buscar en documentos...',
+                                  hintStyle: const TextStyle(
+                                      color: Color(0xFF7A7890),
+                                      fontSize: 14),
+                                  prefixIcon: const Icon(Icons.search,
+                                      color: Color(0xFFB39DDB), size: 20),
+                                  suffixIcon:
+                                      _searchController.text.isNotEmpty
+                                          ? IconButton(
+                                              icon: const Icon(Icons.clear,
+                                                  color: Color(0xFFB39DDB),
+                                                  size: 20),
+                                              onPressed: () {
+                                                _searchController.clear();
+                                                _filtrarDocumentos('');
+                                                FocusScope.of(context).unfocus();
+                                                setState(() => _showOcrOption = false);
+                                              },
+                                            )
+                                          : null,
+                                  border: InputBorder.none,
+                                  contentPadding: const EdgeInsets.symmetric(
+                                      horizontal: 16, vertical: 12),
+                                ),
+                                style: const TextStyle(
+                                    fontSize: 14,
+                                    color: Color(0xFF4E4A67)),
+                                onTap: () => setState(() => _showOcrOption = true),
+                                onChanged: _filtrarDocumentos,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
 
-                            // ── Filtro 2: Modo de búsqueda OCR ──
-                            InkWell(
+                            // ── Filtro OCR ──
+                            if (_showOcrOption)
+                              Listener(
+                                onPointerDown: (_) => _tappedFilter = true,
+                                child: InkWell(
                               borderRadius: BorderRadius.circular(24),
                               onTap: () {
                                 setState(() {
@@ -1030,7 +1154,7 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
                                     const SizedBox(width: 10),
                                     Expanded(
                                       child: Text(
-                                        'Buscar solo en OCR',
+                                        'Buscar solo en textos escaneados (OCR)',
                                         style: TextStyle(
                                           fontSize: 14,
                                           fontWeight: FontWeight.w600,
@@ -1068,49 +1192,7 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
                                     ),
                                   ],
                                 ),
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-
-                            // ── Campo de búsqueda ──
-                            Container(
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFF8F5FF),
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                    color: const Color(0xFFE5DDFB)),
-                              ),
-                              child: TextField(
-                                controller: _searchController,
-                                decoration: InputDecoration(
-                                  hintText: _buscarSoloEnOcr
-                                      ? 'Buscar palabras en texto OCR...'
-                                      : 'Buscar en documentos...',
-                                  hintStyle: const TextStyle(
-                                      color: Color(0xFF7A7890),
-                                      fontSize: 14),
-                                  prefixIcon: const Icon(Icons.search,
-                                      color: Color(0xFFB39DDB), size: 20),
-                                  suffixIcon:
-                                      _searchController.text.isNotEmpty
-                                          ? IconButton(
-                                              icon: const Icon(Icons.clear,
-                                                  color: Color(0xFFB39DDB),
-                                                  size: 20),
-                                              onPressed: () {
-                                                _searchController.clear();
-                                                _filtrarDocumentos('');
-                                              },
-                                            )
-                                          : null,
-                                  border: InputBorder.none,
-                                  contentPadding: const EdgeInsets.symmetric(
-                                      horizontal: 16, vertical: 12),
                                 ),
-                                style: const TextStyle(
-                                    fontSize: 14,
-                                    color: Color(0xFF4E4A67)),
-                                onChanged: _filtrarDocumentos,
                               ),
                             ),
                             const SizedBox(height: 16),
@@ -1839,6 +1921,48 @@ Padding(
               style: TextStyle(fontSize: 12, color: Color(0xFF9A97AE)),
             ),
         ],
+      ),
+    );
+  }
+}
+
+class _ImageOption extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  const _ImageOption({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 12),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF8F5FF),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: const Color(0xFFE5DDFB)),
+          ),
+          child: Column(
+            children: [
+              Icon(icon, color: const Color(0xFFB39DDB), size: 32),
+              const SizedBox(height: 12),
+              Text(label,
+                  style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF4E4A67))),
+            ],
+          ),
+        ),
       ),
     );
   }

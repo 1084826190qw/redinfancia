@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'lista_ninos_page.dart';
 import 'ninos_page.dart';
+import 'settings_page.dart';
 
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
@@ -21,6 +22,15 @@ class HomePage extends StatelessWidget {
         centerTitle: true,
         automaticallyImplyLeading: false,
         title: const Text('ASOPORVENIR'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.settings, color: Color(0xFF4E4A67)),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const SettingsPage()),
+            ),
+          ),
+        ],
       ),
       body: Container(
         decoration: const BoxDecoration(gradient: _backgroundGradient),
