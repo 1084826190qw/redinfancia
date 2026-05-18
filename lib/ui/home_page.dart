@@ -21,7 +21,20 @@ class HomePage extends StatelessWidget {
         elevation: 0,
         centerTitle: true,
         automaticallyImplyLeading: false,
-        title: const Text('ASOPORVENIR'),
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Image.asset(
+              'assets/images/logo.png',
+              width: 80,
+              height: 80,
+              fit: BoxFit.cover,
+              errorBuilder: (context, error, stackTrace) => const SizedBox.shrink(),
+            ),
+            const SizedBox(width: 8),
+            const Text('RED INFANCIA'),
+          ],
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.settings, color: Color(0xFF4E4A67)),

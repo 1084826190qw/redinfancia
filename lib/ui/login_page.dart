@@ -117,37 +117,31 @@ class _LoginPageState extends State<LoginPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Center(
-                        child: Container(
-                          width: 78,
-                          height: 78,
-                          decoration: const BoxDecoration(
-                            shape: BoxShape.circle,
-                            gradient: LinearGradient(
-                              colors: [Color(0xFFF8C8DC), Color(0xFFA7D8FF)],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                            ),
-                          ),
-                          child: const Icon(
-                            Icons.house_rounded,
-                            color: Colors.white,
-                            size: 36,
+                        child: ClipOval(
+                          child: Image.asset(
+                            'assets/images/logo.png',
+                            width: 160,
+                            height: 160,
+                            fit: BoxFit.cover,
                           ),
                         ),
                       ),
                       
                       const SizedBox(height: 24),
-                      const Text(
-                        'Bienvenido a Asociación Asoporvenir',
-                        style: TextStyle(
-                          fontSize: 27,
-                          fontWeight: FontWeight.w700,
-                          color: Color(0xFF4E4A67),
+                      const Center(
+                        child: Text(
+                          'Bienvenid@ a Red Infacia',
+                          style: TextStyle(
+                            fontSize: 27,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF4E4A67),
+                          ),
                         ),
                       ),
                       const SizedBox(height: 8),
-                      const Text(
+                      Text(
                         'Ingresa para continuar de forma segura a la plataforma.',
+                        textAlign: TextAlign.center,
                         style: TextStyle(
                           fontSize: 15,
                           height: 1.4,

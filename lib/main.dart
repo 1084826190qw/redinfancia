@@ -223,8 +223,24 @@ class _AuthGateState extends State<AuthGate> {
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
+      return Scaffold(
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              ClipOval(
+                child: Image.asset(
+                  'assets/images/logo.png',
+                  width: 160,
+                  height: 160,
+                  fit: BoxFit.cover,
+                ),
+              ),
+              const SizedBox(height: 32),
+              const CircularProgressIndicator(),
+            ],
+          ),
+        ),
       );
     }
 

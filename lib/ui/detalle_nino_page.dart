@@ -263,66 +263,7 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
       return;
     }
 
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (_) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFE5DDFB),
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              const SizedBox(height: 20),
-              const Text(
-                'Agregar imagen',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                  color: Color(0xFF4E4A67),
-                ),
-              ),
-              const SizedBox(height: 20),
-              Row(
-                children: [
-                  Expanded(
-                    child: _ImageOption(
-                      icon: Icons.camera_alt_outlined,
-                      label: 'Tomar foto',
-                      onTap: () {
-                        Navigator.pop(context);
-                        procesarImagen(ImageSource.camera);
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: _ImageOption(
-                      icon: Icons.photo_library_outlined,
-                      label: 'Elegir de galería',
-                      onTap: () {
-                        Navigator.pop(context);
-                        procesarImagen(ImageSource.gallery);
-                      },
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-            ],
-          ),
-        ),
-      ),
-    );
+    await procesarImagen(ImageSource.camera);
   }
 
   Future<String> _extraerTextoDeArchivos() async {
@@ -1926,44 +1867,3 @@ Padding(
   }
 }
 
-class _ImageOption extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-
-  const _ImageOption({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(18),
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 12),
-          decoration: BoxDecoration(
-            color: const Color(0xFFF8F5FF),
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: const Color(0xFFE5DDFB)),
-          ),
-          child: Column(
-            children: [
-              Icon(icon, color: const Color(0xFFB39DDB), size: 32),
-              const SizedBox(height: 12),
-              Text(label,
-                  style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF4E4A67))),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
