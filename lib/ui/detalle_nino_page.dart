@@ -46,6 +46,7 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
   final List<String?> _nombresArchivosNuevos = [];
   String? _categoriaArchivosNuevos;
   final ImagePicker _picker = ImagePicker();
+  bool _isSaving = false;
 
   bool get _ocrDisponible =>
       !kIsWeb &&
@@ -263,12 +264,52 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
       return;
     }
 
-    await procesarImagen(ImageSource.camera);
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Agregar documento',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF4E4A67),
+                ),
+              ),
+              const SizedBox(height: 20),
+              ListTile(
+                leading: const Icon(Icons.camera_alt, color: Color(0xFF8F88D9)),
+                title: const Text('Tomar foto'),
+                subtitle: const Text('Usa la cámara'),
+                onTap: () => Navigator.pop(context, ImageSource.camera),
+              ),
+              ListTile(
+                leading: const Icon(Icons.photo_library, color: Color(0xFF8F88D9)),
+                title: const Text('Elegir de galería'),
+                subtitle: const Text('Selecciona una imagen existente'),
+                onTap: () => Navigator.pop(context, ImageSource.gallery),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    if (source != null) {
+      await procesarImagen(source);
+    }
   }
 
-  Future<String> _extraerTextoDeArchivos() async {
-    if (!_ocrDisponible) return '';
-    String textoFinal = '';
+  Future<Map<int, String>> _extraerTextoDeArchivos() async {
+    if (!_ocrDisponible) return {};
+    final Map<int, String> textoPorArchivo = {};
     bool primerError = true;
 
     for (int i = 0; i < _archivosNuevos.length; i++) {
@@ -283,7 +324,7 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
       try {
         final texto = await _extraerTextoOCR(archivo);
         if (texto.trim().isNotEmpty) {
-          textoFinal += texto + '\n\n';
+          textoPorArchivo[i] = texto.trim();
           print('✓ OCR extraído de $nombre: ${texto.length} chars');
         }
       } catch (e) {
@@ -300,7 +341,7 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
         }
       }
     }
-    return textoFinal.trim();
+    return textoPorArchivo;
   }
 
   String _sanitizarNombreArchivo(String nombre) {
@@ -366,6 +407,7 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
   }
 
   Future<void> _guardarDocumentoNuevo(BuildContext dialogContext) async {
+    if (_isSaving) return;
     if (_archivosNuevosBytes.isEmpty && _archivosNuevos.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -381,12 +423,15 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
       return;
     }
 
+    _isSaving = true;
+    if (mounted) setState(() {});
+
     final categoria = _categoriaArchivosNuevos!;
     int archivosSubidos = 0;
 
     try {
-      final textoOcr = await _extraerTextoDeArchivos();
-      print('OCR total extraído: ${textoOcr.length} chars');
+      final textoPorArchivo = await _extraerTextoDeArchivos();
+      print('OCR extraído para ${textoPorArchivo.length} archivo(s)');
 
       for (int i = 0; i < _nombresArchivosNuevos.length; i++) {
         final nombreArchivo = _nombresArchivosNuevos[i];
@@ -409,13 +454,15 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
           await supabase.storage.from('documentos').uploadBinary(path, bytes);
           final url = supabase.storage.from('documentos').getPublicUrl(path);
 
+          final textoOcrArchivo = textoPorArchivo[i];
           await supabase.from('documentos').insert({
             'id_nino': widget.id,
             'nombre_archivo': nombreArchivo,
             'url': url,
             'tipo': tipo,
             'categoria': categoria,
-            if (textoOcr.isNotEmpty) 'contenido_texto': textoOcr,
+            if (textoOcrArchivo != null && textoOcrArchivo.isNotEmpty)
+              'contenido_texto': textoOcrArchivo,
           });
 
           print('✓ Archivo guardado: $nombreArchivo (tipo: $tipo)');
@@ -443,6 +490,9 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error al subir documentos: $e')),
       );
+    } finally {
+      _isSaving = false;
+      if (mounted) setState(() {});
     }
   }
 
@@ -507,24 +557,64 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
     showDialog(
       context: context,
       builder: (context) {
+        bool dialogSaving = false;
         return StatefulBuilder(
           builder: (context, setDialogState) {
             return AlertDialog(
               title: const Text('Agregar documentos'),
+              constraints: const BoxConstraints(maxWidth: 520),
               content: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     DropdownButtonFormField<String>(
                       value: _categoriaArchivosNuevos,
-                      decoration: const InputDecoration(
-                        labelText: 'Categoría (para todos los documentos)',
+                      isExpanded: true,
+                      isDense: true,
+                      decoration: InputDecoration(
+                        labelText: 'Carpeta',
+                        labelStyle: const TextStyle(
+                          fontSize: 12,
+                          color: Color(0xFF8F88D9),
+                        ),
+                        prefixIcon: const Icon(
+                          Icons.folder_outlined,
+                          color: Color(0xFF8F88D9),
+                          size: 18,
+                        ),
+                        filled: true,
+                        fillColor: Colors.white,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 10,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: BorderSide.none,
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: const BorderSide(
+                              color: Color(0xFFE5DDFB)),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: const BorderSide(
+                              color: Color(0xFFB39DDB)),
+                        ),
                       ),
+                      style: const TextStyle(
+                          fontSize: 13,
+                          color: Color(0xFF4E4A67)),
                       items: categoriasDocumentos
                           .where((c) => c != 'Todas las categorías')
                           .map((c) => DropdownMenuItem<String>(
                                 value: c,
-                                child: Text(_formatearNombreCategoria(c)),
+                                child: Text(
+                                  _formatearNombreCategoria(c),
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontSize: 12),
+                                ),
                               ))
                           .toList(),
                       onChanged: (value) {
@@ -534,17 +624,21 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
                     ),
                     const SizedBox(height: 16),
                     ElevatedButton.icon(
-                      onPressed: () async {
-                        await _seleccionarArchivoNuevo(setDialogState);
-                      },
+                      onPressed: dialogSaving
+                          ? null
+                          : () async {
+                              await _seleccionarArchivoNuevo(setDialogState);
+                            },
                       icon: const Icon(Icons.upload_file),
                       label: const Text('Seleccionar archivos'),
                     ),
                     const SizedBox(height: 12),
                     ElevatedButton.icon(
-                      onPressed: () async {
-                        await _escanearDocumentoNuevo(setDialogState);
-                      },
+                      onPressed: dialogSaving
+                          ? null
+                          : () async {
+                              await _escanearDocumentoNuevo(setDialogState);
+                            },
                       icon: const Icon(Icons.camera_alt),
                       label: const Text('Escanear documento'),
                     ),
@@ -574,8 +668,10 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
                               ),
                               IconButton(
                                 icon: const Icon(Icons.delete, size: 20),
-                                onPressed: () =>
-                                    _removerArchivo(index, setDialogState),
+                                onPressed: dialogSaving
+                                    ? null
+                                    : () =>
+                                        _removerArchivo(index, setDialogState),
                                 tooltip: 'Remover archivo',
                               ),
                             ],
@@ -588,14 +684,23 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
               ),
               actions: [
                 TextButton(
-                  onPressed: () => Navigator.pop(context),
+                  onPressed: dialogSaving ? null : () => Navigator.pop(context),
                   child: const Text('Cancelar'),
                 ),
                 ElevatedButton(
-                  onPressed: _nombresArchivosNuevos.isNotEmpty
-                      ? () => _guardarDocumentoNuevo(context)
+                  onPressed: _nombresArchivosNuevos.isNotEmpty && !dialogSaving
+                      ? () async {
+                          setDialogState(() => dialogSaving = true);
+                          await _guardarDocumentoNuevo(context);
+                        }
                       : null,
-                  child: const Text('Guardar'),
+                  child: dialogSaving
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('Guardar'),
                 ),
               ],
             );
@@ -975,39 +1080,58 @@ class _DetalleNinoPageState extends State<DetalleNinoPage> {
                             const SizedBox(height: 20),
 
                             // ── Filtro 1: Categoría ──
-                            Container(
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFF8F5FF),
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                    color: const Color(0xFFE5DDFB)),
-                              ),
-                              child: DropdownButtonFormField<String>(
-                                value: categoriaDocumentoSeleccionada,
-                                decoration: const InputDecoration(
-                                  prefixIcon: Icon(Icons.folder_outlined,
-                                      color: Color(0xFFB39DDB), size: 20),
-                                  border: InputBorder.none,
-                                  contentPadding: EdgeInsets.symmetric(
-                                      horizontal: 16, vertical: 12),
+                            DropdownButtonFormField<String>(
+                              value: categoriaDocumentoSeleccionada,
+                              isExpanded: true,
+                              isDense: true,
+                              decoration: InputDecoration(
+                                labelText: 'Carpeta',
+                                labelStyle: const TextStyle(
+                                  fontSize: 12,
+                                  color: Color(0xFF8F88D9),
                                 ),
-                                style: const TextStyle(
-                                    fontSize: 14,
-                                    color: Color(0xFF4E4A67)),
-                                dropdownColor: const Color(0xFFF8F5FF),
-                                items: categoriasDocumentos
-                                    .map((c) => DropdownMenuItem<String>(
-                                          value: c,
-                                          child: Text(
-                                            _formatearNombreCategoria(c),
-                                            style: const TextStyle(
-                                                fontSize: 14,
-                                                color: Color(0xFF4E4A67)),
-                                          ),
-                                        ))
-                                    .toList(),
-                                onChanged: _cambiarCategoriaDocumento,
+                                prefixIcon: const Icon(
+                                  Icons.folder_outlined,
+                                  color: Color(0xFF8F88D9),
+                                  size: 18,
+                                ),
+                                filled: true,
+                                fillColor: Colors.white,
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 10,
+                                ),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                  borderSide: BorderSide.none,
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                  borderSide: const BorderSide(
+                                      color: Color(0xFFE5DDFB)),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                  borderSide: const BorderSide(
+                                      color: Color(0xFFB39DDB)),
+                                ),
                               ),
+                              style: const TextStyle(
+                                  fontSize: 13,
+                                  color: Color(0xFF4E4A67)),
+                              dropdownColor: const Color(0xFFF8F5FF),
+                              items: categoriasDocumentos
+                                  .map((c) => DropdownMenuItem<String>(
+                                        value: c,
+                                        child: Text(
+                                          _formatearNombreCategoria(c),
+                                          style: const TextStyle(
+                                              fontSize: 12,
+                                              color: Color(0xFF4E4A67)),
+                                        ),
+                                      ))
+                                  .toList(),
+                              onChanged: _cambiarCategoriaDocumento,
                             ),
                             const SizedBox(height: 12),
                             // ── Campo de búsqueda ──
@@ -1546,9 +1670,8 @@ class _TextoOcrViewerState extends State<_TextoOcrViewer> {
         TextSpan(
           text: widget.texto,
           style: const TextStyle(
-            fontSize: 13,
+            fontSize: 14,
             color: Color(0xFF4E4A67),
-            height: 1.6,
           ),
         )
       ];
@@ -1562,41 +1685,35 @@ class _TextoOcrViewerState extends State<_TextoOcrViewer> {
     while (true) {
       final index = textoLower.indexOf(queryLower, start);
       if (index == -1) {
-        // Resto del texto sin coincidencia
         if (start < widget.texto.length) {
           spans.add(TextSpan(
             text: widget.texto.substring(start),
             style: const TextStyle(
-              fontSize: 13,
+              fontSize: 14,
               color: Color(0xFF4E4A67),
-              height: 1.6,
             ),
           ));
         }
         break;
       }
 
-      // Texto antes de la coincidencia
       if (index > start) {
         spans.add(TextSpan(
           text: widget.texto.substring(start, index),
           style: const TextStyle(
-            fontSize: 13,
+            fontSize: 14,
             color: Color(0xFF4E4A67),
-            height: 1.6,
           ),
         ));
       }
 
-      // La coincidencia resaltada
       spans.add(TextSpan(
         text: widget.texto.substring(index, index + widget.query.length),
         style: const TextStyle(
-          fontSize: 13,
+          fontSize: 14,
           fontWeight: FontWeight.bold,
           color: Color(0xFF6E63B6),
           backgroundColor: Color(0x40B39DDB),
-          height: 1.6,
         ),
       ));
 
@@ -1649,7 +1766,7 @@ Padding(
       // ✅ Expanded para que el título no desborde
       Expanded(
         child: Text(
-          'Texto extraído de la imagen',
+          'Texto de la imagen',
           style: TextStyle(
             fontSize: 13,
             fontWeight: FontWeight.w600,
@@ -1737,9 +1854,8 @@ Padding(
                     ? '${widget.texto.substring(0, 120)}...'
                     : widget.texto,
                 style: const TextStyle(
-                  fontSize: 13,
+                  fontSize: 14,
                   color: Color(0xFF7A7890),
-                  height: 1.5,
                 ),
               ),
             ),
@@ -1834,32 +1950,31 @@ Padding(
           if (start > 0)
             const TextSpan(
               text: '...',
-              style: TextStyle(fontSize: 12, color: Color(0xFF9A97AE)),
+              style: TextStyle(fontSize: 13, color: Color(0xFF9A97AE)),
             ),
           TextSpan(
             text: preview.substring(0, matchInPreview),
             style: const TextStyle(
-                fontSize: 12, color: Color(0xFF7A7890), height: 1.5),
+                fontSize: 13, color: Color(0xFF7A7890)),
           ),
           TextSpan(
             text: preview.substring(
                 matchInPreview, matchInPreview + widget.query.length),
             style: const TextStyle(
-              fontSize: 12,
+              fontSize: 13,
               color: Color(0xFF7C4DFF),
               fontWeight: FontWeight.w700,
-              height: 1.5,
             ),
           ),
           TextSpan(
             text: preview.substring(matchInPreview + widget.query.length),
             style: const TextStyle(
-                fontSize: 12, color: Color(0xFF7A7890), height: 1.5),
+                fontSize: 13, color: Color(0xFF7A7890)),
           ),
           if (end < widget.texto.length)
             const TextSpan(
               text: '...',
-              style: TextStyle(fontSize: 12, color: Color(0xFF9A97AE)),
+              style: TextStyle(fontSize: 13, color: Color(0xFF9A97AE)),
             ),
         ],
       ),

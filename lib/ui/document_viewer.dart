@@ -3,6 +3,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
+import 'package:open_file/open_file.dart';
 import 'package:redinfancia/services/document_storage_service.dart';
 
 class DocumentViewer extends StatefulWidget {
@@ -228,7 +229,7 @@ class _DocumentViewerState extends State<DocumentViewer> {
               ),
               const SizedBox(width: 8),
               const Text(
-                "Texto extraído de la imagen",
+                "Texto de la imagen",
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w600,
@@ -304,8 +305,8 @@ class _DocumentViewerState extends State<DocumentViewer> {
           const SizedBox(height: 16),
           ElevatedButton.icon(
             onPressed: () async {
-              final uri = Uri.file(_localFilePath!);
-              if (!await launchUrl(uri)) {
+              final result = await OpenFile.open(_localFilePath!);
+              if (result.type != ResultType.done) {
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(

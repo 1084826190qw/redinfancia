@@ -26,6 +26,8 @@ class _NinosPageState extends State<NinosPage> {
   dynamic imagen;
   final picker = ImagePicker();
 
+  bool _isSaving = false;
+
   // ✅ Cada archivo tiene su propia categoría
   final List<dynamic> _archivos = [];
   final List<dynamic> documentosEscaneados = [];
@@ -193,20 +195,51 @@ class _NinosPageState extends State<NinosPage> {
     }
 
     if (!kIsWeb && Theme.of(context).platform == TargetPlatform.linux) {
-      final pickedFile = await picker.pickImage(
-        source: ImageSource.gallery,
-        imageQuality: 80,
-      );
-      if (pickedFile != null) {
-        setState(() {
-          documentosEscaneados.add(createFile(pickedFile.path));
-          categoriasEscaneados.add(categorias[0]);
-        });
-      }
+      await _escogerImagen(ImageSource.gallery);
       return;
     }
 
-    await _escogerImagen(ImageSource.camera);
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Agregar documento',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF4E4A67),
+                ),
+              ),
+              const SizedBox(height: 20),
+              ListTile(
+                leading: const Icon(Icons.camera_alt, color: Color(0xFF8F88D9)),
+                title: const Text('Tomar foto'),
+                subtitle: const Text('Usa la cámara'),
+                onTap: () => Navigator.pop(context, ImageSource.camera),
+              ),
+              ListTile(
+                leading: const Icon(Icons.photo_library, color: Color(0xFF8F88D9)),
+                title: const Text('Elegir de galería'),
+                subtitle: const Text('Selecciona una imagen existente'),
+                onTap: () => Navigator.pop(context, ImageSource.gallery),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    if (source != null) {
+      await _escogerImagen(source);
+    }
   }
 
   // ✅ Al seleccionar archivos, cada uno empieza con categoría por defecto
@@ -231,18 +264,20 @@ class _NinosPageState extends State<NinosPage> {
     }
   }
 
-  Future<String> _extraerTextoEscaneados() async {
-    if (!_ocrDisponible) return '';
-    String textoFinal = '';
-    for (var file in documentosEscaneados) {
+  Future<Map<int, String>> _extraerTextoEscaneados() async {
+    if (!_ocrDisponible) return {};
+    final Map<int, String> textoPorArchivo = {};
+    for (int i = 0; i < documentosEscaneados.length; i++) {
       try {
-        final texto = await _extraerTextoOCR(file);
-        if (texto.trim().isNotEmpty) textoFinal += texto + '\n\n';
+        final texto = await _extraerTextoOCR(documentosEscaneados[i]);
+        if (texto.trim().isNotEmpty) {
+          textoPorArchivo[i] = texto.trim();
+        }
       } catch (e) {
-        print('Error OCR escaneado: $e');
+        print('Error OCR escaneado $i: $e');
       }
     }
-    return textoFinal.trim();
+    return textoPorArchivo;
   }
 
   // ✅ OCR retorna mapa de índice → texto para asociar a cada archivo
@@ -274,6 +309,7 @@ class _NinosPageState extends State<NinosPage> {
   }
 
   Future<void> guardarNino() async {
+    if (_isSaving) return;
     if (nombreController.text.isEmpty) {
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('Ingresa el nombre')));
@@ -294,6 +330,8 @@ class _NinosPageState extends State<NinosPage> {
           content: Text('Escanea o sube al menos un documento')));
       return;
     }
+
+    setState(() => _isSaving = true);
 
     try {
       final idNino = const Uuid().v4();
@@ -332,10 +370,12 @@ class _NinosPageState extends State<NinosPage> {
       final textoEscaneados = await _extraerTextoEscaneados();
       final textoPorArchivo = await _extraerTextoDeArchivos();
 
-      // Guardar texto OCR global (escaneados) si existe
+      // Guardar texto OCR agregado de todos los escaneados (documento_oculto)
       if (textoEscaneados.isNotEmpty) {
         try {
-          final bytes = Uint8List.fromList(textoEscaneados.codeUnits);
+          final textoAgregado =
+              textoEscaneados.values.join('\n\n');
+          final bytes = Uint8List.fromList(textoAgregado.codeUnits);
           final path =
               '$categoriaBase/$idNino/${_sanitizarNombreArchivo('documento_oculto.txt')}';
           await supabase.storage.from('documentos').uploadBinary(path, bytes);
@@ -347,7 +387,7 @@ class _NinosPageState extends State<NinosPage> {
             'url': urlTexto,
             'tipo': 'texto',
             'categoria': categoriaBase,
-            'contenido_texto': textoEscaneados,
+            'contenido_texto': textoAgregado,
           });
           print('✓ OCR escaneados guardado');
         } catch (e) {
@@ -414,7 +454,8 @@ class _NinosPageState extends State<NinosPage> {
             'url': urlDoc,
             'tipo': 'imagen',
             'categoria': categoriaEscaneo,
-            if (textoEscaneados.isNotEmpty) 'contenido_texto': textoEscaneados,
+            if (textoEscaneados.containsKey(i) && textoEscaneados[i]!.isNotEmpty)
+              'contenido_texto': textoEscaneados[i],
           });
           print('✓ Escaneo guardado: $nombreOriginal');
         } catch (e) {
@@ -449,12 +490,16 @@ class _NinosPageState extends State<NinosPage> {
       print('ERROR GENERAL: $e');
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('Error: $e')));
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return Stack(
+      children: [
+        Scaffold(
       resizeToAvoidBottomInset: true,
       extendBodyBehindAppBar: true,
       appBar: AppBar(
@@ -788,36 +833,55 @@ class _NinosPageState extends State<NinosPage> {
 
           DropdownButtonFormField<String>(
             value: categoriasEscaneados[index],
+            isExpanded: true,
+            isDense: true,
             decoration: InputDecoration(
               labelText: 'Carpeta',
+              labelStyle: const TextStyle(
+                fontSize: 12,
+                color: Color(0xFF8F88D9),
+              ),
               prefixIcon: const Icon(
                 Icons.folder_outlined,
                 color: Color(0xFF8F88D9),
+                size: 18,
               ),
               filled: true,
               fillColor: Colors.white,
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 10,
+                vertical: 10,
+              ),
               border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(10),
                 borderSide: BorderSide.none,
               ),
               enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(10),
                 borderSide: const BorderSide(
                   color: Color(0xFFE5DDFB),
                 ),
               ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: const BorderSide(
+                  color: Color(0xFFB39DDB),
+                ),
+              ),
             ),
+            style: const TextStyle(
+                fontSize: 13,
+                color: Color(0xFF4E4A67)),
             items: categorias.map((cat) {
               return DropdownMenuItem(
                 value: cat,
-child: SizedBox(
-  width: 180,
-  child: Text(
-    _formatearCategoria(cat),
-    overflow: TextOverflow.ellipsis,
-    maxLines: 1,
-  ),
-),              );
+                child: Text(
+                  _formatearCategoria(cat),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
+                  style: const TextStyle(fontSize: 12),
+                ),
+              );
             }).toList(),
             onChanged: (value) {
               if (value != null) {
@@ -901,6 +965,15 @@ child: SizedBox(
           ),
         ),
       ),
+        ),
+        if (_isSaving)
+          Container(
+            color: Colors.black26,
+            child: const Center(
+              child: CircularProgressIndicator(),
+            ),
+          ),
+      ],
     );
   }
 
